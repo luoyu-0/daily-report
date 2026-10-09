@@ -6,6 +6,15 @@ import {DailyReportVideo} from '../video/Composition.js';
 import {totalDurationFrames, VIDEO_FPS, VIDEO_HEIGHT, VIDEO_WIDTH} from '../video/timeline.js';
 import {api} from './api.js';
 
+type OptimizationResult = {
+  edition: Edition;
+  requested: number;
+  optimized: number;
+  fallback: number;
+  inputChars: number;
+  warnings: string[];
+};
+
 function EmptyState({onCreated}: {onCreated: (edition: Edition) => void}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -35,13 +44,13 @@ function EditorCard({story, index, total, edition, onUpdate, onRegenerate, onDra
     finally { setBusy(false); }
   };
   return <article className={`editor-card ${story.selected ? 'selected' : ''}`} draggable onDragStart={onDrag} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
-    <div className="card-top"><span className="drag">⋮⋮</span><strong>#{String(index + 1).padStart(2, '0')}</strong><span className="score">评分 {story.score}</span><span className={`method ${story.generationMethod}`}>{story.generationMethod === 'llm' ? 'LLM + 规则' : '规则回退'}</span><label className="pick"><input type="checkbox" checked={draft.selected} onChange={(event) => setDraft({...draft, selected: event.target.checked})}/>入选</label></div>
+    <div className="card-top"><span className="drag">⋮⋮</span><strong>#{String(index + 1).padStart(2, '0')}</strong><span className="score">评分 {story.score}</span><span className={`method ${story.generationMethod}`}>{story.generationMethod === 'llm' ? 'LLM + 规则' : '规则摘要'}</span><label className="pick"><input type="checkbox" checked={draft.selected} onChange={(event) => setDraft({...draft, selected: event.target.checked})}/>入选</label></div>
     <div className="compare">
       <section className="source-pane"><div className="eyebrow">原始证据</div><h3>{story.titleOriginal}</h3><p>{story.sources[0].content}</p><a href={story.sources[0].url} target="_blank" rel="noreferrer">{story.sources[0].sourceName} ↗</a></section>
       <section className="edit-pane"><div className="edit-heading"><div className="eyebrow">成片文案</div><span className="topic-tag">{draft.category}</span></div><input value={draft.titleZh} onChange={(event) => setDraft({...draft, titleZh: event.target.value})}/><textarea value={draft.summaryZh} onChange={(event) => setDraft({...draft, summaryZh: event.target.value})}/></section>
     </div>
     {story.riskFlags.length > 0 && <div className="warning">⚠ {story.riskFlags.join(' · ')}</div>}
-    <div className="card-actions"><span className={story.confirmed ? 'confirmed' : 'pending'}>{story.confirmed ? '✓ 已确认' : '待确认'}</span><button onClick={() => onRegenerate(story.id)} disabled={busy}>重新生成</button><button onClick={() => save(false)} disabled={busy}>保存</button><button className="primary small" onClick={() => save(true)} disabled={busy}>保存并确认</button></div>
+    <div className="card-actions"><span className={story.confirmed ? 'confirmed' : 'pending'}>{story.confirmed ? '✓ 已确认' : '待确认'}</span><button onClick={() => onRegenerate(story.id)} disabled={busy}>LLM 优化此条</button><button onClick={() => save(false)} disabled={busy}>保存</button><button className="primary small" onClick={() => save(true)} disabled={busy}>保存并确认</button></div>
   </article>;
 }
 
@@ -57,6 +66,8 @@ export function App() {
   const [minScore, setMinScore] = useState(0);
   const [dragId, setDragId] = useState<string>();
   const [job, setJob] = useState<RenderJob>();
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizationMessage, setOptimizationMessage] = useState('');
 
   const loadLatest = async () => {
     try { setEdition(await api<Edition>('/api/editions/latest')); }
@@ -78,6 +89,10 @@ export function App() {
   const industry = (edition?.candidates ?? []).filter((item) => item.section === 'industry');
   const filtered = useMemo(() => industry.filter((item) => item.score >= minScore), [industry, minScore]);
   const selected = industry.filter((item) => item.selected).sort((a, b) => a.position - b.position);
+  const llmTargets = [...github, ...selected].filter((item) => item.generationMethod !== 'llm');
+  const estimatedInputChars = llmTargets.reduce((total, candidate) => total + candidate.sources.reduce(
+    (sourceTotal, source) => sourceTotal + source.title.length + Math.min(source.content.length, 1600), 0,
+  ), 0);
 
   if (loading) return <main className="empty"><div className="loader" /><p>正在载入审核台…</p></main>;
   if (startupError) return <main className="empty"><div className="empty-mark">!</div><h1>今日日报采集失败</h1><p className="startup-error">{startupError}</p><p>未使用过去日期的 GitHub 热榜，也未创建本期日报。请稍后重新运行 <code>npm run daily</code>。</p></main>;
@@ -103,6 +118,19 @@ export function App() {
     try { setEdition(await api<Edition>(`/api/editions/${edition.id}/approve`, {method: 'POST'})); setError(''); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
+  const optimizeSelected = async () => {
+    if (!llmTargets.length) return;
+    const estimate = `${llmTargets.length} 条、最多约 ${(estimatedInputChars / 1000).toFixed(1)}k 个源文本字符`;
+    if (!window.confirm(`将调用 LLM 优化当前已入选内容（${estimate}）。是否继续？`)) return;
+    setOptimizing(true); setError(''); setOptimizationMessage('');
+    try {
+      const result = await api<OptimizationResult>(`/api/editions/${edition.id}/optimize-selected`, {method: 'POST'});
+      setEdition(result.edition);
+      setOptimizationMessage(`LLM 按需优化完成：成功 ${result.optimized} 条，规则回退 ${result.fallback} 条；实际送入约 ${(result.inputChars / 1000).toFixed(1)}k 个源文本字符。`);
+      if (result.warnings.length) setError(`部分内容回退：${result.warnings.join('；')}`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setOptimizing(false); }
+  };
   const render = async () => {
     try { setJob(await api<RenderJob>(`/api/editions/${edition.id}/render`, {method: 'POST'})); setError(''); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
@@ -110,8 +138,9 @@ export function App() {
 
   return <div className="app-shell">
     <header className="app-header"><div><div className="brand"><span>AI</span> {edition.brand.name}</div><h1>{edition.date} 审核台</h1></div><div className="status-block"><span className={`status ${edition.status}`}>{edition.status}</span><small>v{edition.version} · {edition.candidates.length} 条候选</small></div></header>
-    <div className="toolbar"><label>行业候选最低评分 <input type="range" min="0" max="100" value={minScore} onChange={(event) => setMinScore(Number(event.target.value))}/><strong>{minScore}</strong></label><div className="toolbar-spacer"/><span>GitHub <b>{github.length}</b> / 5</span><span>行业概览 <b>{selected.length}</b> / 4</span><button onClick={approve} disabled={edition.status !== 'draft'}>批准并锁定</button><button className="primary" onClick={render} disabled={edition.status !== 'approved'}>渲染 MP4</button></div>
+    <div className="toolbar"><label>行业候选最低评分 <input type="range" min="0" max="100" value={minScore} onChange={(event) => setMinScore(Number(event.target.value))}/><strong>{minScore}</strong></label><div className="toolbar-spacer"/><span>GitHub <b>{github.length}</b> / 5</span><span>行业概览 <b>{selected.length}</b> / 4</span><button onClick={optimizeSelected} disabled={edition.status !== 'draft' || optimizing || !llmTargets.length}>{optimizing ? 'LLM 优化中…' : `LLM 优化已入选（${llmTargets.length}）`}</button><button onClick={approve} disabled={edition.status !== 'draft'}>批准并锁定</button><button className="primary" onClick={render} disabled={edition.status !== 'approved'}>渲染 MP4</button></div>
     {error && <div className="global-error">{error}<button onClick={() => setError('')}>x</button></div>}
+    {optimizationMessage && <div className="global-error" style={{background: '#ecfdf5', borderColor: '#a7f3d0', color: '#047857'}}>{optimizationMessage}<button onClick={() => setOptimizationMessage('')}>x</button></div>}
     {job && <div className={`job ${job.status}`}><div><strong>渲染任务：{job.status}</strong><span>{job.error || job.outputPath || job.logs.at(-1)}</span></div><progress max="100" value={job.progress}/><b>{job.progress}%</b></div>}
     <div className="workspace"><main className="candidate-list"><GithubPanel stories={github}/><div className="section-title industry-title"><div><div className="eyebrow">INDUSTRY · REVIEW</div><h2>行业概览候选</h2></div><span>请选择并确认 4 条</span></div>{filtered.map((story) => <EditorCard key={story.id} story={story} index={industry.indexOf(story)} total={industry.length} edition={edition} onUpdate={update} onRegenerate={regenerate} onDrag={() => setDragId(story.id)} onDrop={() => void drop(story.id)} />)}</main>
       <aside className="preview-panel"><div className="preview-head"><div><div className="eyebrow">REMOTION · PLAYER</div><strong>完整成片预览</strong></div><span>{Math.round(totalDurationFrames(edition) / VIDEO_FPS)} 秒</span></div><div className="video-frame"><Player component={DailyReportVideo} inputProps={{edition, hasBgm: false}} durationInFrames={totalDurationFrames(edition)} fps={VIDEO_FPS} compositionWidth={VIDEO_WIDTH} compositionHeight={VIDEO_HEIGHT} controls loop clickToPlay style={{width: '100%', aspectRatio: '16 / 9'}} /></div><div className="preview-note">此处直接播放与 MP4 渲染相同的 Remotion 时间轴。审核阶段不加载 BGM，正式成片会按本地素材自动处理。</div></aside>

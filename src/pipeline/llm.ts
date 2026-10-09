@@ -3,9 +3,9 @@ import {llmStorySchema, type LlmStory, type SourceRecord} from '../shared/types.
 import {classify, extractiveSummary, latinEntities, numericTokens} from './rules.js';
 
 export type EnrichmentResult = {story: LlmStory; method: 'llm' | 'rule'; warning?: string};
-type LlmRequestConfig = Pick<typeof config.llm, 'baseUrl' | 'apiKey' | 'model' | 'timeoutMs'>;
+type LlmRequestConfig = Pick<typeof config.llm, 'baseUrl' | 'apiKey' | 'model' | 'timeoutMs'> & {evidenceMaxChars?: number};
 
-const fallback = (sources: SourceRecord[], warning?: string): EnrichmentResult => ({
+export const enrichWithRules = (sources: SourceRecord[], warning?: string): EnrichmentResult => ({
   story: {
     titleZh: sources[0].title.slice(0, 80),
     summaryZh: extractiveSummary(sources[0]),
@@ -33,12 +33,13 @@ function validateGrounding(story: LlmStory, sources: SourceRecord[]): string | u
 }
 
 export async function enrichWithLlm(sources: SourceRecord[], llmConfig: LlmRequestConfig = config.llm): Promise<EnrichmentResult> {
-  if (!llmConfig.apiKey || !llmConfig.model) return fallback(sources, '未配置 LLM，已使用规则摘要');
+  if (!llmConfig.apiKey || !llmConfig.model) return enrichWithRules(sources, '未配置 LLM，已使用规则摘要');
+  const evidenceMaxChars = llmConfig.evidenceMaxChars ?? 1_600;
   const evidence = sources.map((item, index) => ({
     ref: `E${index + 1}`, source: item.sourceName, title: item.title,
-    content: item.content.slice(0, 3500), url: item.url, publishedAt: item.publishedAt,
+    content: item.content.slice(0, evidenceMaxChars), url: item.url, publishedAt: item.publishedAt,
   }));
-  const system = `你是中文 AI 新闻编辑。只能使用提供的证据，不得增加任何新事实。若原文为英文，必须翻译并提炼为自然、简洁的中文；公司、人名、产品、模型、项目和 API 等专有名词保留原文。titleZh 使用中文新闻标题，建议 16～35 个汉字；summaryZh 使用 80～150 字中文提炼重点，不是逐字直译。输出 JSON，字段必须为 titleZh、summaryZh、category、keyFacts、sourceRefs、confidence、riskFlags。category 只能是 AI 产品与模型、智能体与安全、芯片与算力、研究与开源、行业动态之一。数字、日期、专有名词必须与证据一致。`;
+  const system = `你是中文 AI 新闻编辑。只能使用提供的证据，不得增加任何新事实。若原文为英文，必须翻译并提炼为自然、简洁的中文；公司、人名、产品、模型、项目和 API 等专有名词保留原文。titleZh 使用中文新闻标题，建议 16～35 个汉字；summaryZh 使用 80～150 字中文提炼重点，不是逐字直译。只输出 JSON，字段必须为 titleZh、summaryZh、category、keyFacts、sourceRefs、confidence、riskFlags。keyFacts 必须是 1～3 条字符串，riskFlags 最多 3 条，confidence 必须是 0 到 1 之间的数字，不能使用字符串。category 只能是 AI 产品与模型、智能体与安全、芯片与算力、研究与开源、行业动态之一。数字、日期、专有名词必须与证据一致。`;
   try {
     const response = await fetch(`${llmConfig.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -55,9 +56,9 @@ export async function enrichWithLlm(sources: SourceRecord[], llmConfig: LlmReque
     const content = payload.choices?.[0]?.message?.content;
     const story = llmStorySchema.parse(JSON.parse(content));
     const groundingError = validateGrounding(story, sources);
-    return groundingError ? fallback(sources, groundingError) : {story, method: 'llm'};
+    return groundingError ? enrichWithRules(sources, groundingError) : {story, method: 'llm'};
   } catch (error) {
-    return fallback(sources, `LLM 失败：${error instanceof Error ? error.message : String(error)}`);
+    return enrichWithRules(sources, `LLM 失败：${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

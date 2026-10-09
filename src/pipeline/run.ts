@@ -2,8 +2,7 @@ import {newId, createEdition, logEvent, upsertCandidate} from '../db.js';
 import type {CandidateStory, Edition, SourceRecord} from '../shared/types.js';
 import {collectAll} from './collectors.js';
 import {deduplicate, scoreGroup} from './rules.js';
-import {enrichWithLlm} from './llm.js';
-import {config} from '../config.js';
+import {enrichWithRules} from './llm.js';
 
 export type DailyRunResult = {edition: Edition; warnings: string[]};
 export type DailyProgress = {completed: number; total: number; title?: string; method?: 'llm' | 'rule'};
@@ -50,9 +49,8 @@ export async function buildCandidates(
   ];
   let completed = 0;
   onProgress?.({completed, total: groups.length});
-  await mapWithConcurrency(groups, config.llm.concurrency, async (group) => {
-    const enriched = await enrichWithLlm(group.sources);
-    if (enriched.warning) warnings.push(`${group.sources[0].title}：${enriched.warning}`);
+  for (const group of groups) {
+    const enriched = enrichWithRules(group.sources);
     const isGithub = group.section === 'github';
     const story: CandidateStory = {
       id: newId('story'), editionId: edition.id,
@@ -73,10 +71,10 @@ export async function buildCandidates(
       generationMethod: enriched.method,
     };
     upsertCandidate(story);
-    logEvent(edition.id, 'enrichment', `${story.titleOriginal} 使用 ${enriched.method === 'llm' ? 'LLM + 规则' : '规则'} 生成`, {storyId: story.id, warning: enriched.warning});
+    logEvent(edition.id, 'enrichment', `${story.titleOriginal} 使用规则摘要生成`, {storyId: story.id});
     completed += 1;
     onProgress?.({completed, total: groups.length, title: story.titleOriginal, method: enriched.method});
-  });
+  }
   return {edition: (await import('../db.js')).getEdition(edition.id)!, warnings};
 }
 

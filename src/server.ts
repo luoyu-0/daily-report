@@ -9,7 +9,7 @@ import {
   createRenderJob, forkEdition, getEdition, getEditionEvents, getLatestEdition, getRenderJob, logEvent,
   updateEditionStatus, upsertCandidate,
 } from './db.js';
-import {buildCandidates} from './pipeline/run.js';
+import {buildCandidates, mapWithConcurrency} from './pipeline/run.js';
 import {enrichWithLlm} from './pipeline/llm.js';
 import {candidateStorySchema} from './shared/types.js';
 import {renderEdition} from './render.js';
@@ -83,6 +83,42 @@ export async function createApp(serveWeb = false) {
     upsertCandidate({...candidate, ...enriched.story, generationMethod: enriched.method, confirmed: false});
     logEvent(edition.id, 'enrichment', `重新生成：${candidate.titleOriginal}`, {candidateId: candidate.id, method: enriched.method, warning: enriched.warning});
     return getEdition(edition.id);
+  });
+  app.post('/api/editions/:id/optimize-selected', async (request, reply) => {
+    let edition = getEdition((request.params as {id: string}).id);
+    if (!edition) return reply.code(404).send({error: '日报不存在'});
+    if (!config.llm.apiKey || !config.llm.model) return reply.code(400).send({error: '尚未配置 LLM API key 或模型'});
+    if (edition.status !== 'draft') edition = forkEdition(edition.id);
+    const industry = edition.candidates.filter((item) => item.section === 'industry' && item.selected);
+    if (industry.length > 4) return reply.code(400).send({error: '请先将行业概览控制在 4 条以内，再进行 LLM 优化'});
+    const targets = edition.candidates.filter((item) => item.selected && item.generationMethod !== 'llm');
+    if (targets.length > 9) return reply.code(400).send({error: '单次最多优化 9 条，请减少入选内容'});
+    if (!targets.length) return {edition, requested: 0, optimized: 0, fallback: 0, inputChars: 0, warnings: []};
+
+    const warnings: string[] = [];
+    let optimized = 0;
+    let fallback = 0;
+    const inputChars = targets.reduce((total, candidate) => total + candidate.sources.reduce(
+      (sourceTotal, source) => sourceTotal + source.title.length + Math.min(source.content.length, config.llm.evidenceMaxChars), 0,
+    ), 0);
+    await mapWithConcurrency(targets, Math.min(2, config.llm.concurrency), async (candidate) => {
+      const enriched = await enrichWithLlm(candidate.sources);
+      if (enriched.method === 'llm') optimized += 1;
+      else {
+        fallback += 1;
+        if (enriched.warning) warnings.push(`${candidate.titleOriginal}：${enriched.warning}`);
+      }
+      upsertCandidate({
+        ...candidate,
+        ...enriched.story,
+        generationMethod: enriched.method,
+        confirmed: candidate.section === 'github',
+      });
+      logEvent(edition!.id, 'enrichment', `按需优化：${candidate.titleOriginal}`, {
+        candidateId: candidate.id, method: enriched.method, warning: enriched.warning,
+      });
+    });
+    return {edition: getEdition(edition.id)!, requested: targets.length, optimized, fallback, inputChars, warnings};
   });
   app.post('/api/editions/:id/approve', async (request, reply) => {
     const edition = getEdition((request.params as {id: string}).id);
