@@ -6,6 +6,7 @@ output-smoke/
 .env.local
 .env
 data/*.db*
+data/logs/
 output/*.mp4
 output/*.json
 public/assets/audio/*.mp3
