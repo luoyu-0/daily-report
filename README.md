@@ -5,6 +5,8 @@
 ## 快速开始
 
 1. 复制 `.env.example` 为 `.env.local`，填写 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`。未配置时会自动使用可追溯的规则摘要。
+
+   如需让本项目单独使用本机代理，可在 `.env.local` 中配置 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY`。npm scripts 会在 Node.js 启动前加载这些配置，不需要在终端手动设置环境变量。
 2. 运行环境检查：
 
    ```powershell
