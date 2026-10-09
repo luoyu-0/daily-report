@@ -11,4 +11,5 @@ public/assets/audio/*.mp3
 !public/assets/audio/.gitkeep
 playwright-report/
 test-results/
+参考模板/
 
