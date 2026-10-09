@@ -50,6 +50,7 @@ function GithubPanel({stories}: {stories: CandidateStory[]}) {
 }
 
 export function App() {
+  const startupError = new URLSearchParams(window.location.search).get('collectionError');
   const [edition, setEdition] = useState<Edition>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -79,6 +80,7 @@ export function App() {
   const selected = industry.filter((item) => item.selected).sort((a, b) => a.position - b.position);
 
   if (loading) return <main className="empty"><div className="loader" /><p>正在载入审核台…</p></main>;
+  if (startupError) return <main className="empty"><div className="empty-mark">!</div><h1>今日日报采集失败</h1><p className="startup-error">{startupError}</p><p>未使用过去日期的 GitHub 热榜，也未创建本期日报。请稍后重新运行 <code>npm run daily</code>。</p></main>;
   if (!edition) return <EmptyState onCreated={setEdition} />;
 
   const update = async (candidateId: string, patch: Partial<CandidateStory>) => {

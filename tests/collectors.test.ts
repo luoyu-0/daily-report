@@ -26,7 +26,7 @@ describe('GitHub Trending 解析', () => {
 
   it('解析社区 RSS 并保留榜单更新时间和来源标记', () => {
     const xml = `<?xml version="1.0"?><rss><channel><pubDate>Thu, 08 Oct 2026 06:50:58 GMT</pubDate><item><title>openai/codex</title><link>https://github.com/openai/codex</link><description><![CDATA[<p>Local coding agent</p>]]></description></item></channel></rss>`;
-    const items = parseGithubTrendingRss(xml, '2026-10-09T01:00:00.000Z');
+    const items = parseGithubTrendingRss(xml, '2026-10-09T01:00:00.000Z', '2026-10-08');
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       title: 'openai/codex',
@@ -34,6 +34,18 @@ describe('GitHub Trending 解析', () => {
       primarySource: false,
       author: 'mshibanami/GitHubTrendingRSS（社区镜像）',
     });
+  });
+
+  it('拒绝使用过去日期的社区榜单', () => {
+    const xml = `<?xml version="1.0"?><rss><channel><pubDate>Thu, 08 Oct 2026 06:50:58 GMT</pubDate><item><title>openai/codex</title><link>https://github.com/openai/codex</link><description>Local coding agent</description></item></channel></rss>`;
+    expect(() => parseGithubTrendingRss(xml, '2026-10-09T01:00:00.000Z', '2026-10-09'))
+      .toThrow('最新榜单为 2026-10-08，不是目标日期 2026-10-09；不会使用历史榜单');
+  });
+
+  it('拒绝没有榜单日期的社区数据', () => {
+    const xml = `<?xml version="1.0"?><rss><channel><item><title>openai/codex</title><link>https://github.com/openai/codex</link></item></channel></rss>`;
+    expect(() => parseGithubTrendingRss(xml, '2026-10-09T01:00:00.000Z', '2026-10-09'))
+      .toThrow('未提供有效榜单日期');
   });
 });
 

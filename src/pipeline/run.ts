@@ -16,7 +16,7 @@ export function partitionCandidateSources(records: SourceRecord[]) {
 }
 
 export async function buildCandidates(date: string, records?: SourceRecord[]): Promise<DailyRunResult> {
-  const collected = records ? {records, warnings: []} : await collectAll(36);
+  const collected = records ? {records, warnings: []} : await collectAll(36, date);
   const {githubRecords, industryGroups} = partitionCandidateSources(collected.records);
   if (!githubRecords.length && !industryGroups.length) throw new Error('未采集到可用资讯，请检查网络和来源配置。');
   const edition = createEdition(date);

@@ -1,4 +1,5 @@
 import {XMLParser} from 'fast-xml-parser';
+import {currentChinaDate} from '../shared/date.js';
 import {sourceRecordSchema, type SourceRecord} from '../shared/types.js';
 import {stableSourceId, stripHtml} from './rules.js';
 
@@ -86,12 +87,21 @@ export function parseGithubTrendingHtml(html: string, fetchedAt = new Date().toI
   });
 }
 
-export function parseGithubTrendingRss(xml: string, fetchedAt = new Date().toISOString()): SourceRecord[] {
+export function parseGithubTrendingRss(
+  xml: string,
+  fetchedAt = new Date().toISOString(),
+  expectedDate = currentChinaDate(new Date(fetchedAt)),
+): SourceRecord[] {
   const document = parser.parse(xml) as Record<string, any>;
   const publishedRaw = textValue(document.rss?.channel?.pubDate);
-  const publishedAt = publishedRaw && !Number.isNaN(Date.parse(publishedRaw))
-    ? new Date(publishedRaw).toISOString()
-    : fetchedAt;
+  if (!publishedRaw || Number.isNaN(Date.parse(publishedRaw))) {
+    throw new Error('GitHub Trending 备用源未提供有效榜单日期，已拒绝使用');
+  }
+  const publishedAt = new Date(publishedRaw).toISOString();
+  const publishedDate = currentChinaDate(new Date(publishedAt));
+  if (publishedDate !== expectedDate) {
+    throw new Error(`GitHub Trending 备用源最新榜单为 ${publishedDate}，不是目标日期 ${expectedDate}；不会使用历史榜单`);
+  }
   const feed: FeedConfig = {
     name: 'GitHub Trending',
     url: 'https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml',
@@ -104,29 +114,40 @@ export function parseGithubTrendingRss(xml: string, fetchedAt = new Date().toISO
   }));
 }
 
-export async function collectGithubTrending(): Promise<SourceRecord[]> {
+export async function collectGithubTrending(expectedDate = currentChinaDate()): Promise<SourceRecord[]> {
+  let officialError = '';
   try {
-    const records = parseGithubTrendingHtml(
-      await fetchWithRetry('https://github.com/trending?since=daily', 1),
-    );
+    const html = await fetchWithRetry('https://github.com/trending?since=daily', 1);
+    const fetchedAt = new Date().toISOString();
+    const fetchedDate = currentChinaDate(new Date(fetchedAt));
+    if (fetchedDate !== expectedDate) {
+      throw new Error(`官方页面只能提供 ${fetchedDate} 的实时榜单，目标日期为 ${expectedDate}`);
+    }
+    const records = parseGithubTrendingHtml(html, fetchedAt);
     if (records.length >= 5) return records;
-  } catch {
-    // 当前网络无法访问 GitHub Trending 时，继续尝试可追溯的社区 RSS 镜像。
+    officialError = `官方页面仅解析到 ${records.length} 条`;
+  } catch (error) {
+    officialError = error instanceof Error ? error.message : String(error);
   }
 
-  const xml = await fetchWithRetry('https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml');
-  const records = parseGithubTrendingRss(xml);
-  if (records.length < 5) throw new Error(`GitHub Trending 备用源仅返回 ${records.length} 条，至少需要 5 条`);
-  return records;
+  try {
+    const xml = await fetchWithRetry('https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml');
+    const records = parseGithubTrendingRss(xml, new Date().toISOString(), expectedDate);
+    if (records.length < 5) throw new Error(`备用源仅返回 ${records.length} 条，至少需要 5 条`);
+    return records;
+  } catch (error) {
+    const mirrorError = error instanceof Error ? error.message : String(error);
+    throw new Error(`GitHub ${expectedDate} 当天热榜不可用。官方页面：${officialError}；备用源：${mirrorError}`);
+  }
 }
 
 export type CollectionResult = {records: SourceRecord[]; warnings: string[]};
 
-export async function collectAll(cutoffHours = 36): Promise<CollectionResult> {
+export async function collectAll(cutoffHours = 36, editionDate = currentChinaDate()): Promise<CollectionResult> {
   const tasks = [
     ...DEFAULT_FEEDS.map((feed) => ({name: feed.name, run: () => collectFeed(feed)})),
     {name: 'arXiv', run: collectArxiv},
-    {name: 'GitHub Trending', run: collectGithubTrending},
+    {name: 'GitHub Trending', run: () => collectGithubTrending(editionDate)},
   ];
   const settled = await Promise.allSettled(tasks.map((task) => task.run()));
   const warnings: string[] = [];
@@ -141,7 +162,11 @@ export async function collectAll(cutoffHours = 36): Promise<CollectionResult> {
     return [];
   });
   const githubCount = records.filter((item) => item.sourceName === 'GitHub Trending').length;
-  if (githubCount < 5) throw new Error(`GitHub Trending 采集不足：仅获得 ${githubCount} 条，无法生成热榜前五`);
+  if (githubCount < 5) {
+    const githubWarning = warnings.find((warning) => warning.startsWith('GitHub Trending 采集失败：'));
+    throw new Error(githubWarning?.replace('GitHub Trending 采集失败：', '')
+      ?? `GitHub ${editionDate} 当天热榜采集不足：仅获得 ${githubCount} 条；不会使用历史榜单`);
+  }
   const cutoff = Date.now() - cutoffHours * 3_600_000;
   return {
     records: records.filter((item) => !item.publishedAt || Date.parse(item.publishedAt) >= cutoff),
