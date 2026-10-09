@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.cache/
+data-smoke/
+output-smoke/
+.env.local
+data/*.db*
+output/*.mp4
+output/*.json
+public/assets/audio/*.mp3
+!public/assets/audio/.gitkeep
+playwright-report/
+test-results/
+
