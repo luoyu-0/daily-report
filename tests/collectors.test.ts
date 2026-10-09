@@ -1,5 +1,11 @@
 import {describe, expect, it} from 'vitest';
-import {parseFeed, parseGithubTrendingHtml, parseGithubTrendingRss} from '../src/pipeline/collectors.js';
+import {
+  parseAnthropicNewsHtml,
+  parseFeed,
+  parseGithubTrendingHtml,
+  parseGithubTrendingRss,
+  parseMetaBlogHtml,
+} from '../src/pipeline/collectors.js';
 
 describe('RSS / Atom 解析', () => {
   it('解析 RSS 并清理 HTML', () => {
@@ -13,6 +19,36 @@ describe('RSS / Atom 解析', () => {
   it('忽略缺少合法链接的条目', () => {
     const xml = `<feed><entry><title>Missing link</title><summary>Body</summary></entry></feed>`;
     expect(parseFeed(xml, {name: 'Example', url: 'https://example.com/feed'})).toHaveLength(0);
+  });
+});
+
+describe('官方资讯页解析', () => {
+  it('解析 Anthropic 新闻列表', () => {
+    const html = `<li><a href="/news/2026-usage-policy-update" class="listItem"><time>Oct 8, 2026</time><span class="PublicationList__subject">Announcements</span><span class="PublicationList__title body-3">2026 Usage Policy update</span></a></li>`;
+    const items = parseAnthropicNewsHtml(html, '2026-10-09T01:00:00.000Z');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      sourceName: 'Anthropic',
+      title: '2026 Usage Policy update',
+      url: 'https://www.anthropic.com/news/2026-usage-policy-update',
+      publishedAt: '2026-10-08T12:00:00.000Z',
+    });
+  });
+
+  it('解析 Meta AI 博客卡片并解码标题', () => {
+    const html = `<a aria-label="Read Reimagining Independence: How AI&#x2019;s helping people" href="https://ai.meta.com/blog/reimagining-independence/"><div>Read more</div><div>July 9, 2026</div></a>`;
+    const items = parseMetaBlogHtml(html, '2026-10-09T01:00:00.000Z');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      sourceName: 'Meta AI',
+      title: 'Reimagining Independence: How AI’s helping people',
+      publishedAt: '2026-07-09T12:00:00.000Z',
+    });
+  });
+
+  it('忽略官方页面中没有发布日期的链接', () => {
+    const html = `<a aria-label="Read Undated article" href="https://ai.meta.com/blog/undated/">Read</a>`;
+    expect(parseMetaBlogHtml(html)).toHaveLength(0);
   });
 });
 

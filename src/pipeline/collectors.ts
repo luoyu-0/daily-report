@@ -3,13 +3,11 @@ import {currentChinaDate} from '../shared/date.js';
 import {sourceRecordSchema, type SourceRecord} from '../shared/types.js';
 import {stableSourceId, stripHtml} from './rules.js';
 
-type FeedConfig = {name: string; url: string; primarySource?: boolean};
+type FeedConfig = {name: string; url: string; primarySource?: boolean; timeoutMs?: number};
 
 export const DEFAULT_FEEDS: FeedConfig[] = [
-  {name: 'OpenAI', url: 'https://openai.com/news/rss.xml'},
-  {name: 'Anthropic', url: 'https://www.anthropic.com/rss.xml'},
+  {name: 'OpenAI', url: 'https://openai.com/news/rss.xml', timeoutMs: 25_000},
   {name: 'Google DeepMind', url: 'https://deepmind.google/blog/rss.xml'},
-  {name: 'Meta AI', url: 'https://ai.meta.com/blog/rss/'},
   {name: 'Microsoft Research', url: 'https://www.microsoft.com/en-us/research/feed/'},
   {name: 'NVIDIA', url: 'https://blogs.nvidia.com/feed/'},
 ];
@@ -25,13 +23,29 @@ const textValue = (value: unknown): string => {
   return '';
 };
 
-async function fetchWithRetry(url: string, attempts = 2): Promise<string> {
+const errorMessage = (error: unknown): string => {
+  if (!(error instanceof Error)) return String(error);
+  const cause = error.cause as {code?: string; message?: string} | undefined;
+  const causeDetails = [cause?.code, cause?.message].filter(Boolean).join('：');
+  return causeDetails ? `${error.message}（${causeDetails}）` : error.message;
+};
+
+const decodeHtmlText = (value: string): string => stripHtml(value
+  .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+  .replace(/&#(\d+);/g, (_, decimal: string) => String.fromCodePoint(Number.parseInt(decimal, 10))));
+
+const pageDate = (value: string): string | undefined => {
+  const timestamp = Date.parse(`${value.trim()} 12:00:00 UTC`);
+  return Number.isNaN(timestamp) ? undefined : new Date(timestamp).toISOString();
+};
+
+async function fetchWithRetry(url: string, attempts = 2, timeoutMs = 15_000): Promise<string> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       const response = await fetch(url, {
         headers: {'user-agent': 'AI-Insight-Daily/1.0 (+local review workflow)'},
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return await response.text();
@@ -39,7 +53,7 @@ async function fetchWithRetry(url: string, attempts = 2): Promise<string> {
       lastError = error;
     }
   }
-  throw lastError;
+  throw new Error(errorMessage(lastError));
 }
 
 export function parseFeed(xml: string, feed: FeedConfig, fetchedAt = new Date().toISOString()): SourceRecord[] {
@@ -62,7 +76,58 @@ export function parseFeed(xml: string, feed: FeedConfig, fetchedAt = new Date().
 }
 
 export async function collectFeed(feed: FeedConfig): Promise<SourceRecord[]> {
-  return parseFeed(await fetchWithRetry(feed.url), feed);
+  return parseFeed(await fetchWithRetry(feed.url, 2, feed.timeoutMs), feed);
+}
+
+export function parseAnthropicNewsHtml(html: string, fetchedAt = new Date().toISOString()): SourceRecord[] {
+  const pattern = /<a\b[^>]*href="(\/news\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const seen = new Set<string>();
+  return Array.from(html.matchAll(pattern)).flatMap((match) => {
+    const url = new URL(match[1], 'https://www.anthropic.com').toString();
+    if (seen.has(url)) return [];
+    const body = match[2];
+    const date = body.match(/<time\b[^>]*>([\s\S]*?)<\/time>/i)?.[1];
+    const category = decodeHtmlText(body.match(/<span\b[^>]*class="[^"]*__subject[^"]*"[^>]*>([\s\S]*?)<\/span>/i)?.[1] ?? '');
+    const title = decodeHtmlText(body.match(/<span\b[^>]*class="[^"]*__title[^"]*"[^>]*>([\s\S]*?)<\/span>/i)?.[1] ?? '');
+    const publishedAt = date ? pageDate(decodeHtmlText(date)) : undefined;
+    if (!title || !publishedAt) return [];
+    seen.add(url);
+    return [sourceRecordSchema.parse({
+      id: stableSourceId(url), sourceName: 'Anthropic', title, url,
+      content: category ? `${category}：${title}` : title,
+      publishedAt, fetchedAt, primarySource: true,
+    })];
+  });
+}
+
+export async function collectAnthropicNews(): Promise<SourceRecord[]> {
+  return parseAnthropicNewsHtml(await fetchWithRetry('https://www.anthropic.com/news'));
+}
+
+export function parseMetaBlogHtml(html: string, fetchedAt = new Date().toISOString()): SourceRecord[] {
+  const linkPattern = /<a\b[^>]*aria-label="Read ([^"]+)"[^>]*href="(https:\/\/ai\.meta\.com\/blog\/[^"]+)"[^>]*>/gi;
+  const matches = Array.from(html.matchAll(linkPattern));
+  const seen = new Set<string>();
+  return matches.flatMap((match, index) => {
+    const url = match[2].replace(/&amp;/g, '&');
+    if (seen.has(url)) return [];
+    const start = match.index ?? 0;
+    const end = matches[index + 1]?.index ?? Math.min(html.length, start + 8_000);
+    const cardHtml = html.slice(start, end);
+    const date = cardHtml.match(/\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},\s+\d{4})\b/i)?.[1];
+    const title = decodeHtmlText(match[1]);
+    const publishedAt = date ? pageDate(date) : undefined;
+    if (!title || !publishedAt) return [];
+    seen.add(url);
+    return [sourceRecordSchema.parse({
+      id: stableSourceId(url), sourceName: 'Meta AI', title, url,
+      content: title, publishedAt, fetchedAt, primarySource: true,
+    })];
+  });
+}
+
+export async function collectMetaBlog(): Promise<SourceRecord[]> {
+  return parseMetaBlogHtml(await fetchWithRetry('https://ai.meta.com/blog/'));
 }
 
 export async function collectArxiv(): Promise<SourceRecord[]> {
@@ -146,6 +211,8 @@ export type CollectionResult = {records: SourceRecord[]; warnings: string[]};
 export async function collectAll(cutoffHours = 36, editionDate = currentChinaDate()): Promise<CollectionResult> {
   const tasks = [
     ...DEFAULT_FEEDS.map((feed) => ({name: feed.name, run: () => collectFeed(feed)})),
+    {name: 'Anthropic', run: collectAnthropicNews},
+    {name: 'Meta AI', run: collectMetaBlog},
     {name: 'arXiv', run: collectArxiv},
     {name: 'GitHub Trending', run: () => collectGithubTrending(editionDate)},
   ];
