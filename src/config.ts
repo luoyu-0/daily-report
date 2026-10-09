@@ -21,6 +21,7 @@ export const config = {
     apiKey: process.env.LLM_API_KEY || '',
     model: process.env.LLM_MODEL || '',
     timeoutMs: Number(process.env.LLM_TIMEOUT_MS ?? 30_000),
+    concurrency: Math.max(1, Math.min(8, Number(process.env.LLM_CONCURRENCY ?? 4))),
   },
   brand: brandConfigSchema.parse({
     name: 'AI 智讯日报',

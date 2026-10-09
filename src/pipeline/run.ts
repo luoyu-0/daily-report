@@ -3,8 +3,26 @@ import type {CandidateStory, Edition, SourceRecord} from '../shared/types.js';
 import {collectAll} from './collectors.js';
 import {deduplicate, scoreGroup} from './rules.js';
 import {enrichWithLlm} from './llm.js';
+import {config} from '../config.js';
 
 export type DailyRunResult = {edition: Edition; warnings: string[]};
+export type DailyProgress = {completed: number; total: number; title?: string; method?: 'llm' | 'rule'};
+
+export async function mapWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workers = Array.from({length: Math.min(Math.max(1, concurrency), items.length)}, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+}
 
 export function partitionCandidateSources(records: SourceRecord[]) {
   const githubRecords = records.filter((item) => item.sourceName === 'GitHub Trending').slice(0, 5);
@@ -15,7 +33,11 @@ export function partitionCandidateSources(records: SourceRecord[]) {
   return {githubRecords, industryGroups};
 }
 
-export async function buildCandidates(date: string, records?: SourceRecord[]): Promise<DailyRunResult> {
+export async function buildCandidates(
+  date: string,
+  records?: SourceRecord[],
+  onProgress?: (progress: DailyProgress) => void,
+): Promise<DailyRunResult> {
   const collected = records ? {records, warnings: []} : await collectAll(36, date);
   const {githubRecords, industryGroups} = partitionCandidateSources(collected.records);
   if (!githubRecords.length && !industryGroups.length) throw new Error('未采集到可用资讯，请检查网络和来源配置。');
@@ -26,7 +48,9 @@ export async function buildCandidates(date: string, records?: SourceRecord[]): P
     ...githubRecords.map((source, index) => ({sources: [source], score: Math.max(70, 95 - index * 3), section: 'github' as const, position: index})),
     ...industryGroups.map((group, index) => ({...group, section: 'industry' as const, position: index})),
   ];
-  for (const group of groups) {
+  let completed = 0;
+  onProgress?.({completed, total: groups.length});
+  await mapWithConcurrency(groups, config.llm.concurrency, async (group) => {
     const enriched = await enrichWithLlm(group.sources);
     if (enriched.warning) warnings.push(`${group.sources[0].title}：${enriched.warning}`);
     const isGithub = group.section === 'github';
@@ -50,7 +74,9 @@ export async function buildCandidates(date: string, records?: SourceRecord[]): P
     };
     upsertCandidate(story);
     logEvent(edition.id, 'enrichment', `${story.titleOriginal} 使用 ${enriched.method === 'llm' ? 'LLM + 规则' : '规则'} 生成`, {storyId: story.id, warning: enriched.warning});
-  }
+    completed += 1;
+    onProgress?.({completed, total: groups.length, title: story.titleOriginal, method: enriched.method});
+  });
   return {edition: (await import('../db.js')).getEdition(edition.id)!, warnings};
 }
 

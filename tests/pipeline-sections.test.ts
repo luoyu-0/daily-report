@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {partitionCandidateSources} from '../src/pipeline/run.js';
+import {mapWithConcurrency, partitionCandidateSources} from '../src/pipeline/run.js';
 import type {SourceRecord} from '../src/shared/types.js';
 
 const source = (index: number, sourceName: string): SourceRecord => ({
@@ -24,6 +24,21 @@ describe('日报两大板块', () => {
     expect(result.githubRecords.map((item) => item.title)).toEqual(records.slice(0, 5).map((item) => item.title));
     expect(result.industryGroups).toHaveLength(8);
     expect(result.industryGroups.every((group) => group.sources.every((item) => item.sourceName !== 'GitHub Trending'))).toBe(true);
+  });
+
+  it('候选提炼遵守并发上限并处理全部条目', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const completed: number[] = [];
+    await mapWithConcurrency([0, 1, 2, 3, 4, 5], 3, async (item) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      completed.push(item);
+      active -= 1;
+    });
+    expect(maxActive).toBe(3);
+    expect(completed.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5]);
   });
 });
 

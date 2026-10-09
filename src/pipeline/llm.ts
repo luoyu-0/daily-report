@@ -3,6 +3,7 @@ import {llmStorySchema, type LlmStory, type SourceRecord} from '../shared/types.
 import {classify, extractiveSummary, latinEntities, numericTokens} from './rules.js';
 
 export type EnrichmentResult = {story: LlmStory; method: 'llm' | 'rule'; warning?: string};
+type LlmRequestConfig = Pick<typeof config.llm, 'baseUrl' | 'apiKey' | 'model' | 'timeoutMs'>;
 
 const fallback = (sources: SourceRecord[], warning?: string): EnrichmentResult => ({
   story: {
@@ -31,7 +32,7 @@ function validateGrounding(story: LlmStory, sources: SourceRecord[]): string | u
   return undefined;
 }
 
-export async function enrichWithLlm(sources: SourceRecord[], llmConfig = config.llm): Promise<EnrichmentResult> {
+export async function enrichWithLlm(sources: SourceRecord[], llmConfig: LlmRequestConfig = config.llm): Promise<EnrichmentResult> {
   if (!llmConfig.apiKey || !llmConfig.model) return fallback(sources, '未配置 LLM，已使用规则摘要');
   const evidence = sources.map((item, index) => ({
     ref: `E${index + 1}`, source: item.sourceName, title: item.title,
