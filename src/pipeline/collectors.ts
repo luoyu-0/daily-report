@@ -70,10 +70,8 @@ export async function collectArxiv(): Promise<SourceRecord[]> {
   return parseFeed(await fetchWithRetry(feed.url), {...feed, primarySource: true});
 }
 
-export async function collectGithubTrending(): Promise<SourceRecord[]> {
-  const html = await fetchWithRetry('https://github.com/trending?since=daily');
+export function parseGithubTrendingHtml(html: string, fetchedAt = new Date().toISOString()): SourceRecord[] {
   const articles = html.match(/<article[\s\S]*?<\/article>/gi) ?? [];
-  const fetchedAt = new Date().toISOString();
   return articles.slice(0, 15).flatMap((article) => {
     const match = article.match(/href="\/(?!sponsors)([^"?#]+\/[^"?#]+)"/i);
     if (!match) return [];
@@ -88,6 +86,40 @@ export async function collectGithubTrending(): Promise<SourceRecord[]> {
   });
 }
 
+export function parseGithubTrendingRss(xml: string, fetchedAt = new Date().toISOString()): SourceRecord[] {
+  const document = parser.parse(xml) as Record<string, any>;
+  const publishedRaw = textValue(document.rss?.channel?.pubDate);
+  const publishedAt = publishedRaw && !Number.isNaN(Date.parse(publishedRaw))
+    ? new Date(publishedRaw).toISOString()
+    : fetchedAt;
+  const feed: FeedConfig = {
+    name: 'GitHub Trending',
+    url: 'https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml',
+    primarySource: false,
+  };
+  return parseFeed(xml, feed, fetchedAt).slice(0, 15).map((item) => sourceRecordSchema.parse({
+    ...item,
+    publishedAt,
+    author: 'mshibanami/GitHubTrendingRSS（社区镜像）',
+  }));
+}
+
+export async function collectGithubTrending(): Promise<SourceRecord[]> {
+  try {
+    const records = parseGithubTrendingHtml(
+      await fetchWithRetry('https://github.com/trending?since=daily', 1),
+    );
+    if (records.length >= 5) return records;
+  } catch {
+    // 当前网络无法访问 GitHub Trending 时，继续尝试可追溯的社区 RSS 镜像。
+  }
+
+  const xml = await fetchWithRetry('https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml');
+  const records = parseGithubTrendingRss(xml);
+  if (records.length < 5) throw new Error(`GitHub Trending 备用源仅返回 ${records.length} 条，至少需要 5 条`);
+  return records;
+}
+
 export type CollectionResult = {records: SourceRecord[]; warnings: string[]};
 
 export async function collectAll(cutoffHours = 36): Promise<CollectionResult> {
@@ -99,10 +131,17 @@ export async function collectAll(cutoffHours = 36): Promise<CollectionResult> {
   const settled = await Promise.allSettled(tasks.map((task) => task.run()));
   const warnings: string[] = [];
   const records = settled.flatMap((result, index) => {
-    if (result.status === 'fulfilled') return result.value;
+    if (result.status === 'fulfilled') {
+      if (tasks[index].name === 'GitHub Trending' && result.value.some((item) => !item.primarySource)) {
+        warnings.push('GitHub 官方 Trending 页面不可达，已使用 mshibanami/GitHubTrendingRSS 社区镜像');
+      }
+      return result.value;
+    }
     warnings.push(`${tasks[index].name} 采集失败：${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
     return [];
   });
+  const githubCount = records.filter((item) => item.sourceName === 'GitHub Trending').length;
+  if (githubCount < 5) throw new Error(`GitHub Trending 采集不足：仅获得 ${githubCount} 条，无法生成热榜前五`);
   const cutoff = Date.now() - cutoffHours * 3_600_000;
   return {
     records: records.filter((item) => !item.publishedAt || Date.parse(item.publishedAt) >= cutoff),

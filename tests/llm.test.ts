@@ -7,7 +7,7 @@ describe('LLM 回退', () => {
       id: 's1', sourceName: 'Official', title: 'New open source AI model',
       url: 'https://example.com/model', content: 'A new open source AI model was released today. It supports research use.',
       fetchedAt: new Date().toISOString(), primarySource: true,
-    }]);
+    }], {baseUrl: 'https://example.com/v1', apiKey: '', model: '', timeoutMs: 100});
     expect(result.method).toBe('rule');
     expect(result.story.sourceRefs).toEqual(['E1']);
     expect(result.story.summaryZh).not.toBe('');

@@ -4,6 +4,7 @@ dist/
 data-smoke/
 output-smoke/
 .env.local
+.env
 data/*.db*
 output/*.mp4
 output/*.json

@@ -88,12 +88,14 @@ export async function createApp(serveWeb = false) {
     const edition = getEdition((request.params as {id: string}).id);
     if (!edition) return reply.code(404).send({error: '日报不存在'});
     if (edition.status !== 'draft') return reply.code(409).send({error: '只能批准草稿'});
-    const selected = edition.candidates.filter((item) => item.selected);
-    if (selected.length < 5 || selected.length > 6) return reply.code(400).send({error: '必须选择 5～6 条新闻'});
-    if (selected.some((item) => !item.confirmed)) return reply.code(400).send({error: '所有入选新闻必须逐条确认'});
-    if (selected.some((item) => !item.sources.length || !item.evidence.length)) return reply.code(400).send({error: '入选新闻缺少来源或证据'});
+    const github = edition.candidates.filter((item) => item.section === 'github' && item.selected);
+    const selected = edition.candidates.filter((item) => item.section === 'industry' && item.selected);
+    if (github.length !== 5) return reply.code(400).send({error: 'GitHub 当天热榜必须包含前 5 条'});
+    if (selected.length !== 4) return reply.code(400).send({error: '行业概览必须选择 4 条新闻'});
+    if (selected.some((item) => !item.confirmed)) return reply.code(400).send({error: '行业概览的入选新闻必须逐条确认'});
+    if ([...github, ...selected].some((item) => !item.sources.length || !item.evidence.length)) return reply.code(400).send({error: '入选内容缺少来源或证据'});
     const approved = updateEditionStatus(edition.id, 'approved');
-    logEvent(edition.id, 'approval', '人工批准并锁定日报', {selectedIds: selected.map((item) => item.id)});
+    logEvent(edition.id, 'approval', '人工批准并锁定日报', {githubIds: github.map((item) => item.id), selectedIds: selected.map((item) => item.id)});
     return approved;
   });
   app.post('/api/editions/:id/render', async (request, reply) => {

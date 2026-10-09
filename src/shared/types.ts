@@ -40,6 +40,7 @@ export const candidateStorySchema = z.object({
   titleZh: z.string(),
   summaryZh: z.string(),
   category: categorySchema,
+  section: z.enum(['github', 'industry']).default('industry'),
   score: z.number().min(0).max(100),
   selected: z.boolean(),
   confirmed: z.boolean(),

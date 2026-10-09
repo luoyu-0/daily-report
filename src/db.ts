@@ -57,7 +57,15 @@ function hydrateEdition(row: Record<string, unknown>): Edition {
   const candidates = sqlite
     .prepare('SELECT payload_json FROM candidates WHERE edition_id = ?')
     .all(row.id)
-    .map((item) => candidateStorySchema.parse(JSON.parse((item as {payload_json: string}).payload_json)))
+    .map((item) => {
+      const raw = JSON.parse((item as {payload_json: string}).payload_json);
+      if (!raw.section && raw.sources?.[0]?.sourceName === 'GitHub Trending') {
+        raw.section = 'github';
+        raw.selected = true;
+        raw.confirmed = true;
+      }
+      return candidateStorySchema.parse(raw);
+    })
     .sort((a, b) => a.position - b.position);
   return editionSchema.parse({
     id: row.id,

@@ -24,6 +24,7 @@
     "@fastify/static": "^10.1.5",
     "@remotion/bundler": "^4.0.534",
     "@remotion/cli": "^4.0.534",
+    "@remotion/player": "^4.0.534",
     "@remotion/renderer": "^4.0.534",
     "better-sqlite3": "^13.0.3",
     "dotenv": "^18.0.6",

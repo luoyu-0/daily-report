@@ -31,20 +31,26 @@ function Intro({edition}: {edition: Edition}) {
 }
 
 function Agenda({edition}: {edition: Edition}) {
-  const stories = edition.candidates.filter((item) => item.selected).sort((a, b) => a.position - b.position);
-  const categories = [...new Set(stories.map((item) => item.category))];
+  const github = edition.candidates.filter((item) => item.section === 'github' && item.selected).sort((a, b) => a.position - b.position).slice(0, 5);
+  const stories = edition.candidates.filter((item) => item.section === 'industry' && item.selected).sort((a, b) => a.position - b.position);
   return <Fade><AbsoluteFill style={{...base, background: edition.brand.background, color: edition.brand.ink, padding: 86}}>
     <header style={{display: 'flex', justifyContent: 'space-between', alignItems: 'end', borderBottom: `3px solid ${edition.brand.primary}`, paddingBottom: 26}}>
       <div><div style={{fontWeight: 900, color: edition.brand.primary, fontSize: 24}}>今日导读</div><h1 style={{fontSize: 68, margin: '12px 0 0'}}>{edition.date} · AI 重点</h1></div>
-      <div style={{fontSize: 28, fontWeight: 800}}>{stories.length} 条精选</div>
+      <div style={{fontSize: 28, fontWeight: 800}}>2 大板块</div>
     </header>
-    <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 24, marginTop: 34}}>
-      {stories.map((story, index) => <div key={story.id} style={{display: 'grid', gridTemplateColumns: '58px 1fr', gap: 20, padding: '22px 26px', borderRadius: 22, background: '#fff', border: `1px solid ${edition.brand.paleBlue}`}}>
-        <strong style={{fontSize: 26, color: edition.brand.primary}}>{String(index + 1).padStart(2, '0')}</strong>
-        <div><div style={{fontSize: 18, color: '#64748b', fontWeight: 800, marginBottom: 7}}>{story.category}</div><div style={{fontSize: 25, fontWeight: 800, lineHeight: 1.35}}>{story.titleZh}</div></div>
-      </div>)}
+    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 30, marginTop: 42, flex: 1}}>
+      <div style={{padding: 34, borderRadius: 28, background: '#fff', border: `1px solid ${edition.brand.paleBlue}`}}><div style={{fontSize: 22, color: edition.brand.primary, fontWeight: 900}}>01</div><h2 style={{fontSize: 44, margin: '12px 0 24px'}}>GitHub 当天热榜</h2>{github.map((story, index) => <div key={story.id} style={{fontSize: 24, lineHeight: 1.75, fontWeight: 750}}>{index + 1}. {story.titleZh}</div>)}</div>
+      <div style={{padding: 34, borderRadius: 28, background: '#fff', border: `1px solid ${edition.brand.paleBlue}`}}><div style={{fontSize: 22, color: edition.brand.primary, fontWeight: 900}}>02</div><h2 style={{fontSize: 44, margin: '12px 0 24px'}}>行业概览</h2>{stories.map((story, index) => <div key={story.id} style={{fontSize: 23, lineHeight: 1.65, marginBottom: 9, fontWeight: 750}}>{index + 1}. {story.titleZh}</div>)}</div>
     </div>
-    <footer style={{marginTop: 'auto', color: '#64748b', fontSize: 22}}>{categories.join(' / ')}</footer>
+    <footer style={{marginTop: 24, color: '#64748b', fontSize: 22}}>GitHub Top {github.length} · 行业精选 {stories.length} 条</footer>
+  </AbsoluteFill></Fade>;
+}
+
+function GithubPage({edition}: {edition: Edition}) {
+  const stories = edition.candidates.filter((item) => item.section === 'github' && item.selected).sort((a, b) => a.position - b.position).slice(0, 5);
+  return <Fade><AbsoluteFill style={{...base, background: edition.brand.background, color: edition.brand.ink, padding: 86}}>
+    <header style={{display: 'flex', alignItems: 'end', justifyContent: 'space-between', borderBottom: `3px solid ${edition.brand.primary}`, paddingBottom: 24}}><div><div style={{fontSize: 22, color: edition.brand.primary, fontWeight: 900, letterSpacing: 3}}>GITHUB · DAILY</div><h1 style={{fontSize: 66, margin: '10px 0 0'}}>当天热榜前五</h1></div><strong style={{fontSize: 24}}>无需人工审核</strong></header>
+    <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20, marginTop: 30}}>{stories.map((story, index) => <div key={story.id} style={{gridColumn: index === 4 ? '1 / span 2' : undefined, display: 'grid', gridTemplateColumns: '62px 1fr auto', gap: 18, alignItems: 'center', padding: '24px 28px', background: '#fff', border: `1px solid ${edition.brand.paleBlue}`, borderRadius: 22}}><strong style={{fontSize: 30, color: edition.brand.primary}}>{String(index + 1).padStart(2, '0')}</strong><div><h2 style={{fontSize: 28, margin: '0 0 8px'}}>{story.titleZh}</h2><p style={{fontSize: 19, color: '#475569', margin: 0, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden'}}>{story.summaryZh}</p></div><span style={{fontSize: 16, padding: '7px 11px', borderRadius: 99, background: edition.brand.paleBlue, color: edition.brand.primary, fontWeight: 800}}>{story.category}</span></div>)}</div>
   </AbsoluteFill></Fade>;
 }
 
@@ -58,7 +64,7 @@ function SectionPage({category, brand, number}: {category: string; brand: BrandC
 }
 
 function StoryPage({edition, storyIndex}: {edition: Edition; storyIndex: number}) {
-  const stories = edition.candidates.filter((item) => item.selected).sort((a, b) => a.position - b.position);
+  const stories = edition.candidates.filter((item) => item.section === 'industry' && item.selected).sort((a, b) => a.position - b.position);
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const reveal = spring({frame, fps, config: {damping: 20, stiffness: 130}});
@@ -66,24 +72,24 @@ function StoryPage({edition, storyIndex}: {edition: Edition; storyIndex: number}
 }
 
 function Summary({edition}: {edition: Edition}) {
-  const stories = edition.candidates.filter((item) => item.selected).sort((a, b) => a.position - b.position);
+  const github = edition.candidates.filter((item) => item.section === 'github' && item.selected);
+  const stories = edition.candidates.filter((item) => item.section === 'industry' && item.selected).sort((a, b) => a.position - b.position);
   return <Fade><AbsoluteFill style={{...base, background: edition.brand.background, color: edition.brand.ink, padding: 90}}>
     <div style={{fontSize: 24, color: edition.brand.primary, fontWeight: 900}}>{edition.brand.name}</div>
     <h1 style={{fontSize: 70, margin: '15px 0 32px'}}>今日要点回顾</h1>
     <div style={{display: 'grid', gap: 15}}>{stories.map((story, index) => <div key={story.id} style={{display: 'grid', gridTemplateColumns: '62px 1fr auto', gap: 20, alignItems: 'center', padding: '17px 24px', background: '#fff', borderRadius: 18, border: `1px solid ${edition.brand.paleBlue}`}}><strong style={{fontSize: 22, color: edition.brand.primary}}>{String(index + 1).padStart(2, '0')}</strong><span style={{fontSize: 24, fontWeight: 800}}>{story.titleZh}</span><small style={{fontSize: 17, color: '#64748b'}}>{story.sources[0].sourceName}</small></div>)}</div>
-    <p style={{fontSize: 21, color: '#64748b', marginTop: 'auto'}}>所有内容均保留原始来源与证据映射 · {edition.date}</p>
+    <p style={{fontSize: 21, color: '#64748b', marginTop: 'auto'}}>GitHub 热榜 {github.length} 条 · 行业概览 {stories.length} 条 · 所有内容均保留原始来源与证据映射</p>
   </AbsoluteFill></Fade>;
 }
 
 export function DailyReportVideo({edition, hasBgm}: VideoProps) {
   const timeline = buildTimeline(edition);
-  let sectionNumber = 0;
   return <AbsoluteFill style={{background: edition.brand.background}}>
     {timeline.map((segment, index) => {
-      if (segment.type === 'section') sectionNumber += 1;
       const content = segment.type === 'intro' ? <Intro edition={edition} />
         : segment.type === 'agenda' ? <Agenda edition={edition} />
-        : segment.type === 'section' ? <SectionPage category={segment.category!} brand={edition.brand} number={sectionNumber} />
+        : segment.type === 'github' ? <GithubPage edition={edition} />
+        : segment.type === 'section' ? <SectionPage category="行业概览" brand={edition.brand} number={2} />
         : segment.type === 'story' ? <StoryPage edition={edition} storyIndex={segment.storyIndex!} />
         : <Summary edition={edition} />;
       return <Sequence key={`${segment.type}-${index}`} from={segment.from} durationInFrames={segment.durationInFrames}>{content}</Sequence>;
