@@ -1,11 +1,14 @@
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
+  collectGithubTrending,
   parseAnthropicNewsHtml,
   parseFeed,
   parseGithubTrendingHtml,
-  parseGithubTrendingRss,
   parseMetaBlogHtml,
 } from '../src/pipeline/collectors.js';
+import {currentChinaDate} from '../src/shared/date.js';
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('RSS / Atom 解析', () => {
   it('解析 RSS 并清理 HTML', () => {
@@ -53,6 +56,21 @@ describe('官方资讯页解析', () => {
 });
 
 describe('GitHub Trending 解析', () => {
+  it('请求中文口语筛选下的 Today 榜', async () => {
+    const html = Array.from({length: 5}, (_, index) =>
+      `<article><h2><a href="/owner/repo-${index}">owner / repo-${index}</a></h2></article>`,
+    ).join('');
+    const fetchMock = vi.fn(async () => new Response(html, {status: 200}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await collectGithubTrending(currentChinaDate());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://github.com/trending?since=daily&spoken_language_code=zh',
+      expect.any(Object),
+    );
+  });
+
   it('解析 GitHub 官方页面中的仓库', () => {
     const html = `<article><h2><a href="/openai/codex">openai / codex</a></h2><p>Local coding agent</p></article>`;
     const items = parseGithubTrendingHtml(html, '2026-10-09T01:00:00.000Z');
@@ -60,28 +78,13 @@ describe('GitHub Trending 解析', () => {
     expect(items[0]).toMatchObject({title: 'openai/codex', url: 'https://github.com/openai/codex', primarySource: true});
   });
 
-  it('解析社区 RSS 并保留榜单更新时间和来源标记', () => {
-    const xml = `<?xml version="1.0"?><rss><channel><pubDate>Thu, 08 Oct 2026 06:50:58 GMT</pubDate><item><title>openai/codex</title><link>https://github.com/openai/codex</link><description><![CDATA[<p>Local coding agent</p>]]></description></item></channel></rss>`;
-    const items = parseGithubTrendingRss(xml, '2026-10-09T01:00:00.000Z', '2026-10-08');
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({
-      title: 'openai/codex',
-      publishedAt: '2026-10-08T06:50:58.000Z',
-      primarySource: false,
-      author: 'mshibanami/GitHubTrendingRSS（社区镜像）',
-    });
-  });
+  it('官方中文榜不可用时明确失败，不回退到不同榜单', async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => { throw new Error('network unavailable'); });
+    vi.stubGlobal('fetch', fetchMock);
 
-  it('拒绝使用过去日期的社区榜单', () => {
-    const xml = `<?xml version="1.0"?><rss><channel><pubDate>Thu, 08 Oct 2026 06:50:58 GMT</pubDate><item><title>openai/codex</title><link>https://github.com/openai/codex</link><description>Local coding agent</description></item></channel></rss>`;
-    expect(() => parseGithubTrendingRss(xml, '2026-10-09T01:00:00.000Z', '2026-10-09'))
-      .toThrow('最新榜单为 2026-10-08，不是目标日期 2026-10-09；不会使用历史榜单');
-  });
-
-  it('拒绝没有榜单日期的社区数据', () => {
-    const xml = `<?xml version="1.0"?><rss><channel><item><title>openai/codex</title><link>https://github.com/openai/codex</link></item></channel></rss>`;
-    expect(() => parseGithubTrendingRss(xml, '2026-10-09T01:00:00.000Z', '2026-10-09'))
-      .toThrow('未提供有效榜单日期');
+    await expect(collectGithubTrending(currentChinaDate())).rejects.toThrow('中文口语 Today 榜不可用');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([url]) => url === 'https://github.com/trending?since=daily&spoken_language_code=zh')).toBe(true);
   });
 });
 

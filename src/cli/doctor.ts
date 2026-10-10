@@ -5,6 +5,7 @@ import {chromium} from 'playwright';
 import ffmpegPath from 'ffmpeg-static';
 import ffprobe from 'ffprobe-static';
 import {config} from '../config.js';
+import {GITHUB_TRENDING_URL} from '../pipeline/collectors.js';
 
 const checks: Array<{name: string; ok: boolean; detail: string}> = [];
 const nodeMajor = Number(process.versions.node.split('.')[0]);
@@ -30,7 +31,7 @@ if (proxyValue) {
 }
 checks.push({name: '项目代理', ok: proxyOk, detail: proxyDetail});
 try {
-  const response = await fetch('https://github.com/trending?since=daily', {signal: AbortSignal.timeout(10_000)});
+  const response = await fetch(GITHUB_TRENDING_URL, {signal: AbortSignal.timeout(10_000)});
   const html = await response.text();
   const count = html.match(/<article[\s\S]*?<\/article>/gi)?.length ?? 0;
   checks.push({name: 'GitHub Trending', ok: response.ok && count >= 5, detail: `HTTP ${response.status}，解析到 ${count} 条`});
