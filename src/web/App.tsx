@@ -10,12 +10,19 @@ import './tool-radar.css';
 type OptimizationResult = {edition: DiscoveryEdition; requested: number; optimized: number; fallback: number; inputChars: number; warnings: string[]};
 const toolTypes: ToolType[] = ['CLI', '桌面应用', 'Web 工具', '开发工具', '自动化', 'Agent', '框架与库', '其他'];
 const lines = (value: string) => value.split('\n').map((item) => item.trim()).filter(Boolean);
+const parseEdition = (value: unknown): DiscoveryEdition => {
+  const candidate = value as Partial<DiscoveryEdition> | null;
+  const valid = candidate?.kind === 'github-tools' && typeof candidate.id === 'string' && Array.isArray(candidate.candidates)
+    && candidate.candidates.every((item) => typeof item?.repo === 'string' && typeof item?.rank === 'number' && Array.isArray(item?.sources));
+  if (!valid) throw new Error('审核服务版本不兼容。请关闭旧审核台后重新运行 npm run daily。');
+  return candidate as DiscoveryEdition;
+};
 
 function EmptyState({onCreated}: {onCreated: (edition: DiscoveryEdition) => void}) {
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const create = async () => {
     setBusy(true); setError('');
-    try { onCreated((await api<{edition: DiscoveryEdition}>('/api/editions', {method: 'POST', body: JSON.stringify({date: currentChinaDate()})})).edition); }
+    try { onCreated(parseEdition((await api<{edition: unknown}>('/api/editions', {method: 'POST', body: JSON.stringify({date: currentChinaDate()})})).edition)); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
   };
@@ -54,7 +61,7 @@ export function App() {
   const [error, setError] = useState(''); const [minScore, setMinScore] = useState(0); const [toolsOnly, setToolsOnly] = useState(false);
   const [job, setJob] = useState<RenderJob>(); const [optimizing, setOptimizing] = useState(false); const [optimizationMessage, setOptimizationMessage] = useState('');
   const loadLatest = async () => {
-    try { setEdition(await api<DiscoveryEdition>('/api/editions/latest')); }
+    try { setEdition(parseEdition(await api<unknown>('/api/editions/latest'))); }
     catch (reason) { if (!(reason instanceof Error && reason.message === '暂无工具雷达日报')) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setLoading(false); }
   };
@@ -71,17 +78,17 @@ export function App() {
   if (loading) return <main className="empty"><div className="loader"/><p>正在载入审核台…</p></main>;
   if (startupError) return <main className="empty"><div className="empty-mark">!</div><h1>今日工具采集失败</h1><p className="startup-error">{startupError}</p><p>未使用过去日期榜单，请稍后重新运行 <code>npm run daily</code>。</p></main>;
   if (!edition) return <EmptyState onCreated={setEdition}/>;
-  const update = async (id: string, patch: Partial<ToolCandidate>) => { setEdition(await api<DiscoveryEdition>(`/api/editions/${edition.id}/candidates/${id}`, {method: 'PATCH', body: JSON.stringify(patch)})); setError(''); };
+  const update = async (id: string, patch: Partial<ToolCandidate>) => { setEdition(parseEdition(await api<unknown>(`/api/editions/${edition.id}/candidates/${id}`, {method: 'PATCH', body: JSON.stringify(patch)}))); setError(''); };
   const regenerate = async (id: string) => {
     if (!window.confirm('将调用一次 LLM 优化此工具。是否继续？')) return;
-    try { setEdition(await api<DiscoveryEdition>(`/api/editions/${edition.id}/candidates/${id}/regenerate`, {method: 'POST'})); }
+    try { setEdition(parseEdition(await api<unknown>(`/api/editions/${edition.id}/candidates/${id}/regenerate`, {method: 'POST'}))); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
-  const approve = async () => { try { setEdition(await api<DiscoveryEdition>(`/api/editions/${edition.id}/approve`, {method: 'POST'})); setError(''); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } };
+  const approve = async () => { try { setEdition(parseEdition(await api<unknown>(`/api/editions/${edition.id}/approve`, {method: 'POST'}))); setError(''); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } };
   const optimize = async () => {
     if (!llmTargets.length || !window.confirm(`将调用 LLM 优化 ${llmTargets.length} 个入选工具，最多发送约 ${(estimatedChars / 1000).toFixed(1)}k 字符。是否继续？`)) return;
     setOptimizing(true); setError('');
-    try { const result = await api<OptimizationResult>(`/api/editions/${edition.id}/optimize-selected`, {method: 'POST'}); setEdition(result.edition); setOptimizationMessage(`优化完成：成功 ${result.optimized}，规则回退 ${result.fallback}。`); if (result.warnings.length) setError(result.warnings.join('；')); }
+    try { const result = await api<OptimizationResult>(`/api/editions/${edition.id}/optimize-selected`, {method: 'POST'}); setEdition(parseEdition(result.edition)); setOptimizationMessage(`优化完成：成功 ${result.optimized}，规则回退 ${result.fallback}。`); if (result.warnings.length) setError(result.warnings.join('；')); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setOptimizing(false); }
   };
   const render = async () => { try { setJob(await api<RenderJob>(`/api/editions/${edition.id}/render`, {method: 'POST'})); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } };

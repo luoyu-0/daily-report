@@ -12,6 +12,7 @@ import {
 import {buildCandidates, mapWithConcurrency} from './pipeline/run.js';
 import {enrichToolWithLlm} from './pipeline/llm.js';
 import {toolCandidateSchema, type DiscoveryEdition} from './shared/types.js';
+import {REVIEW_API_VERSION, REVIEW_APP_ID} from './shared/review-contract.js';
 import {renderEdition} from './render.js';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -39,7 +40,7 @@ export function validateApproval(edition: DiscoveryEdition): string | undefined 
 export async function createApp(serveWeb = false) {
   const app = Fastify({logger: true, bodyLimit: 1_000_000});
 
-  app.get('/api/health', async () => ({ok: true, time: new Date().toISOString()}));
+  app.get('/api/health', async () => ({ok: true, app: REVIEW_APP_ID, apiVersion: REVIEW_API_VERSION, time: new Date().toISOString()}));
   app.get('/api/editions/latest', async (_, reply) => getLatestEdition() ?? reply.code(404).send({error: '暂无工具雷达日报'}));
   app.get('/api/editions/:id', async (request, reply) => getEdition((request.params as {id: string}).id) ?? reply.code(404).send({error: '日报不存在'}));
   app.get('/api/editions/:id/events', async (request, reply) => {

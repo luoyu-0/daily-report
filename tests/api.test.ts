@@ -28,6 +28,7 @@ describe('本地审核 API', () => {
     const response = await app.inject({method: 'GET', url: '/api/health'});
     expect(response.statusCode).toBe(200);
     expect(response.json().ok).toBe(true);
+    expect(response.json()).toMatchObject({app: 'github-tool-radar', apiVersion: 2});
   });
 
   it('拒绝渲染不存在的日报', async () => {

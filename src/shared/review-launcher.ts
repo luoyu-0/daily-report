@@ -3,6 +3,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {config} from '../config.js';
 import {openLocalUrl} from './open-local-url.js';
+import {REVIEW_API_VERSION, REVIEW_APP_ID} from './review-contract.js';
 
 export type ReviewLaunchResult = {started: boolean; pid?: number; url: string};
 
@@ -12,23 +13,38 @@ const reviewUrl = (startupError?: string) => {
   return url.toString();
 };
 
-async function isReviewReady(): Promise<boolean> {
+async function reviewState(): Promise<'ready' | 'stale' | 'down'> {
+  const request = async (url: string) => {
+    try { return await fetch(url, {signal: AbortSignal.timeout(800)}); } catch { return undefined; }
+  };
+  const [api, web] = await Promise.all([
+    request(`http://127.0.0.1:${config.appPort}/api/health`),
+    request(`http://127.0.0.1:${config.reviewPort}`),
+  ]);
+  if (!api?.ok && !web?.ok) return 'down';
+  if (!api?.ok || !web?.ok) return 'stale';
   try {
-    const [api, web] = await Promise.all([
-      fetch(`http://127.0.0.1:${config.appPort}/api/health`, {signal: AbortSignal.timeout(800)}),
-      fetch(`http://127.0.0.1:${config.reviewPort}`, {signal: AbortSignal.timeout(800)}),
-    ]);
-    return api.ok && web.ok;
+    const health = await api.json() as {app?: string; apiVersion?: number};
+    return health.app === REVIEW_APP_ID && health.apiVersion === REVIEW_API_VERSION ? 'ready' : 'stale';
   } catch {
-    return false;
+    return 'stale';
   }
 }
 
 export async function launchReviewInBackground(startupError?: string): Promise<ReviewLaunchResult> {
   const url = reviewUrl(startupError);
-  if (await isReviewReady()) {
+  let initialState = await reviewState();
+  // Vite 或旧 Node 进程退出时两个端口可能短暂不同步，先等待其稳定。
+  for (let attempt = 0; initialState === 'stale' && attempt < 3; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    initialState = await reviewState();
+  }
+  if (initialState === 'ready') {
     openLocalUrl(url);
     return {started: false, url};
+  }
+  if (initialState === 'stale') {
+    throw new Error('检测到旧版或不完整的审核服务仍占用端口。请先关闭旧审核台进程，再重新运行 npm run daily。');
   }
 
   const logDir = path.join(config.dataDir, 'logs');
@@ -55,7 +71,7 @@ export async function launchReviewInBackground(startupError?: string): Promise<R
   child.once('error', (error) => { spawnError = error; });
   for (let attempt = 0; attempt < 40; attempt += 1) {
     if (spawnError) break;
-    if (await isReviewReady()) return {started: true, pid: child.pid, url};
+    if (await reviewState() === 'ready') return {started: true, pid: child.pid, url};
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   throw new Error(`审核台后台启动失败${spawnError ? `：${spawnError.message}` : ''}，请查看 ${logPath}`);

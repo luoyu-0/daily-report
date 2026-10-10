@@ -10,6 +10,7 @@ const date = arg('--date') ?? currentChinaDate();
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('--date 必须为 YYYY-MM-DD');
 
 console.log(`正在读取 ${date} 的全球 GitHub Trending Today…`);
+let collectionError = '';
 try {
   const result = await buildCandidates(date);
   console.log(`已创建 ${result.edition.id}，工具候选 ${result.edition.candidates.length} 条。`);
@@ -19,18 +20,27 @@ try {
     console.log('采集完成；已按 --no-review 跳过审核台启动。');
   } else {
     console.log('采集完成，正在后台启动本地审核台…');
-    const review = await launchReviewInBackground();
-    console.log(`审核台已${review.started ? '启动' : '在运行'}：${review.url}`);
-    console.log('daily 命令已结束，可以继续使用当前终端。');
+    try {
+      const review = await launchReviewInBackground();
+      console.log(`审核台已${review.started ? '启动' : '在运行'}：${review.url}`);
+      console.log('daily 命令已结束，可以继续使用当前终端。');
+    } catch (error) {
+      console.error(`候选已保存，但审核台启动失败：${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
   }
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`工具雷达创建失败：${message}`);
+  collectionError = error instanceof Error ? error.message : String(error);
+  console.error(`工具雷达创建失败：${collectionError}`);
   process.exitCode = 1;
   if (!process.argv.includes('--no-review')) {
     console.log('正在打开审核台显示失败原因…');
-    const review = await launchReviewInBackground(message);
-    console.log(`审核台已${review.started ? '启动' : '在运行'}：${review.url}`);
+    try {
+      const review = await launchReviewInBackground(collectionError);
+      console.log(`审核台已${review.started ? '启动' : '在运行'}：${review.url}`);
+    } catch (launchError) {
+      console.error(`审核台启动失败：${launchError instanceof Error ? launchError.message : String(launchError)}`);
+    }
   }
 }
 
