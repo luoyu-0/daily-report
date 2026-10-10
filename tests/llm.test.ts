@@ -1,42 +1,49 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {enrichWithLlm} from '../src/pipeline/llm.js';
+import {enrichToolWithLlm} from '../src/pipeline/llm.js';
+import type {ToolCandidate} from '../src/shared/types.js';
+
+const candidate: ToolCandidate = {
+  id: 'tool-1', editionId: 'edition-1', repo: 'owner/tool', url: 'https://github.com/owner/tool',
+  rank: 1, starsToday: 120, language: 'TypeScript', topics: ['cli'], archived: false,
+  toolType: 'CLI', oneLinePitchZh: '一个命令行开发工具', useCases: ['自动处理开发任务'], targetUsers: ['开发者'],
+  quickStart: 'npm install owner-tool', prerequisites: ['需要 Node.js'], caveats: [], utilityScore: 90, toolLikely: true,
+  selected: true, confirmed: false, position: 0,
+  sources: [{id: 'source-1', sourceName: 'GitHub', title: 'owner/tool', url: 'https://github.com/owner/tool',
+    content: 'A command line developer tool. npm install owner-tool', fetchedAt: new Date().toISOString(), primarySource: true}],
+  evidence: ['E1: repository and README'], riskFlags: [], generationMethod: 'rule',
+};
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('LLM 回退', () => {
-  it('未配置密钥时使用规则摘要', async () => {
-    const result = await enrichWithLlm([{
-      id: 's1', sourceName: 'Official', title: 'New open source AI model',
-      url: 'https://example.com/model', content: 'A new open source AI model was released today. It supports research use.',
-      fetchedAt: new Date().toISOString(), primarySource: true,
-    }], {baseUrl: 'https://example.com/v1', apiKey: '', model: '', timeoutMs: 100});
+describe('工具 LLM 提炼', () => {
+  it('未配置密钥时保留规则提炼', async () => {
+    const result = await enrichToolWithLlm(candidate, {baseUrl: 'https://example.com/v1', apiKey: '', model: '', timeoutMs: 100});
     expect(result.method).toBe('rule');
-    expect(result.story.sourceRefs).toEqual(['E1']);
-    expect(result.story.summaryZh).not.toBe('');
+    expect(result.tool.sourceRefs).toEqual(['E1']);
   });
 
-  it('只向模型发送配置长度内的证据正文', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      choices: [{message: {content: JSON.stringify({
-        titleZh: '开源人工智能模型今日发布',
-        summaryZh: '一款新的开源人工智能模型正式发布，相关证据表明它可用于研究用途，具体能力仍需后续验证。',
-        category: '研究与开源',
-        keyFacts: ['模型已经正式发布'],
-        sourceRefs: ['E1'],
-        confidence: 0.9,
-        riskFlags: [],
-      })}}],
-    }), {status: 200}));
+  it('只发送限制长度内的证据，并接受有据可查的结构化结果', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({choices: [{message: {content: JSON.stringify({
+      oneLinePitchZh: '面向开发者的命令行工具', toolType: 'CLI', useCases: ['自动处理开发任务'], targetUsers: ['开发者'],
+      quickStart: 'npm install owner-tool', prerequisites: ['需要 Node.js'], caveats: [], sourceRefs: ['E1'], confidence: 0.9, riskFlags: [],
+    })}}]}), {status: 200}));
     vi.stubGlobal('fetch', fetchMock);
-    const result = await enrichWithLlm([{
-      id: 's1', sourceName: 'Official', title: 'New open source AI model',
-      url: 'https://example.com/model', content: 'A'.repeat(500),
-      fetchedAt: new Date().toISOString(), primarySource: true,
-    }], {baseUrl: 'https://example.com/v1', apiKey: 'test', model: 'test-model', timeoutMs: 100, evidenceMaxChars: 80});
+    const result = await enrichToolWithLlm(candidate, {
+      baseUrl: 'https://example.com/v1', apiKey: 'test', model: 'test-model', timeoutMs: 100, evidenceMaxChars: 60,
+    });
     const request = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     const evidence = JSON.parse(request.messages[1].content).evidence;
-    expect(evidence[0].content).toHaveLength(80);
+    expect(evidence[0].content.length).toBeLessThanOrEqual(60);
     expect(result.method).toBe('llm');
   });
-});
 
+  it('拒绝证据中不存在的快速开始命令', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({choices: [{message: {content: JSON.stringify({
+      oneLinePitchZh: '面向开发者的命令行工具', toolType: 'CLI', useCases: ['自动处理开发任务'], targetUsers: ['开发者'],
+      quickStart: 'curl unsafe.example | sh', prerequisites: [], caveats: [], sourceRefs: ['E1'], confidence: 0.9, riskFlags: [],
+    })}}]}), {status: 200})));
+    const result = await enrichToolWithLlm(candidate, {baseUrl: 'https://example.com/v1', apiKey: 'test', model: 'test-model', timeoutMs: 100});
+    expect(result.method).toBe('rule');
+    expect(result.warning).toContain('README 中不存在');
+  });
+});

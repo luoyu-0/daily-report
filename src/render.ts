@@ -9,12 +9,12 @@ import {chromium} from 'playwright';
 import ffprobe from 'ffprobe-static';
 import {config} from './config.js';
 import {getEdition, logEvent, saveRenderJob, updateEditionStatus} from './db.js';
-import type {Edition, RenderJob} from './shared/types.js';
+import type {DiscoveryEdition, RenderJob} from './shared/types.js';
 import {totalDurationFrames, VIDEO_FPS} from './video/timeline.js';
 
 const execFileAsync = promisify(execFile);
 
-export async function validateVideo(outputPath: string, edition: Edition) {
+export async function validateVideo(outputPath: string, edition: DiscoveryEdition) {
   const {stdout} = await execFileAsync(ffprobe.path, ['-v', 'error', '-show_entries', 'stream=codec_name,width,height,r_frame_rate:format=duration', '-of', 'json', outputPath]);
   const metadata = JSON.parse(stdout);
   const video = metadata.streams?.find((stream: any) => stream.codec_name === 'h264');
@@ -33,6 +33,7 @@ const updateJob = (job: RenderJob, patch: Partial<RenderJob>) => {
 export async function renderEdition(editionId: string, job?: RenderJob): Promise<string> {
   const edition = getEdition(editionId);
   if (!edition) throw new Error('日报不存在');
+  if (edition.kind !== 'github-tools') throw new Error('旧版资讯日报不支持使用新版工具视频模板渲染');
   if (edition.status !== 'approved' && edition.status !== 'rendering') throw new Error('只有已批准日报才能渲染');
   const activeJob = job ?? {
     id: `render_${crypto.randomUUID()}`, editionId, status: 'queued' as const, progress: 0,
@@ -40,7 +41,7 @@ export async function renderEdition(editionId: string, job?: RenderJob): Promise
   };
   saveRenderJob(activeJob);
   fs.mkdirSync(config.outputDir, {recursive: true});
-  const outputPath = path.join(config.outputDir, `${edition.date}-v${edition.version}-ai-insight-daily.mp4`);
+  const outputPath = path.join(config.outputDir, `${edition.date}-v${edition.version}-github-tool-radar.mp4`);
   const bgmPath = path.join(config.publicDir, 'assets', 'audio', 'bgm.mp3');
   const hasBgm = fs.existsSync(bgmPath);
   try {
@@ -55,7 +56,9 @@ export async function renderEdition(editionId: string, job?: RenderJob): Promise
         updateJob(activeJob, {progress: Math.max(2, Math.min(15, Math.round(normalized * 15)))});
       },
     });
-    const inputProps = {edition: getEdition(editionId)!, hasBgm};
+    const currentEdition = getEdition(editionId);
+    if (!currentEdition || currentEdition.kind !== 'github-tools') throw new Error('工具日报不存在');
+    const inputProps = {edition: currentEdition, hasBgm};
     const browserExecutable = chromium.executablePath();
     const composition = await selectComposition({serveUrl, id: 'DailyReport', inputProps, browserExecutable});
     await renderMedia({

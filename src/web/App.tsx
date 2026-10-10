@@ -1,150 +1,94 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Player} from '@remotion/player';
-import type {CandidateStory, Edition, RenderJob} from '../shared/types.js';
+import type {DiscoveryEdition, RenderJob, ToolCandidate, ToolType} from '../shared/types.js';
 import {currentChinaDate} from '../shared/date.js';
 import {DailyReportVideo} from '../video/Composition.js';
 import {totalDurationFrames, VIDEO_FPS, VIDEO_HEIGHT, VIDEO_WIDTH} from '../video/timeline.js';
 import {api} from './api.js';
+import './tool-radar.css';
 
-type OptimizationResult = {
-  edition: Edition;
-  requested: number;
-  optimized: number;
-  fallback: number;
-  inputChars: number;
-  warnings: string[];
-};
+type OptimizationResult = {edition: DiscoveryEdition; requested: number; optimized: number; fallback: number; inputChars: number; warnings: string[]};
+const toolTypes: ToolType[] = ['CLI', '桌面应用', 'Web 工具', '开发工具', '自动化', 'Agent', '框架与库', '其他'];
+const lines = (value: string) => value.split('\n').map((item) => item.trim()).filter(Boolean);
 
-function EmptyState({onCreated}: {onCreated: (edition: Edition) => void}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+function EmptyState({onCreated}: {onCreated: (edition: DiscoveryEdition) => void}) {
+  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const create = async () => {
     setBusy(true); setError('');
-    try {
-      const result = await api<{edition: Edition}>('/api/editions', {method: 'POST', body: JSON.stringify({date: currentChinaDate()})});
-      onCreated(result.edition);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    try { onCreated((await api<{edition: DiscoveryEdition}>('/api/editions', {method: 'POST', body: JSON.stringify({date: currentChinaDate()})})).edition); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
   };
-  return <main className="empty"><div className="empty-mark">AI</div><h1>AI 智讯日报</h1><p>还没有可审核的日报。创建今日任务后，系统将采集并整理最近 36 小时的资讯。</p><button className="primary" onClick={create} disabled={busy}>{busy ? '正在采集…' : '创建今日日报'}</button>{error && <div className="error">{error}</div>}</main>;
+  return <main className="empty"><div className="empty-mark">GH</div><h1>GitHub 工具雷达</h1><p>读取全球 GitHub Trending Today 前 15 名，结合仓库资料发现值得尝试的工具。</p><button className="primary" onClick={create} disabled={busy}>{busy ? '正在发现工具…' : '创建今日工具雷达'}</button>{error && <div className="error">{error}</div>}</main>;
 }
 
-function EditorCard({story, index, total, edition, onUpdate, onRegenerate, onDrag, onDrop}: {
-  story: CandidateStory; index: number; total: number; edition: Edition;
-  onUpdate: (id: string, patch: Partial<CandidateStory>) => Promise<void>;
-  onRegenerate: (id: string) => Promise<void>;
-  onDrag: () => void; onDrop: () => void;
+function TrendingRadar({tools}: {tools: ToolCandidate[]}) {
+  return <section className="github-panel"><div className="section-title"><div><div className="eyebrow">GLOBAL · TRENDING · TODAY</div><h2>今日全球热榜</h2></div><span className="auto-badge">采集时快照</span></div><div className="github-grid">{[...tools].sort((a, b) => a.rank - b.rank).map((tool) => <article key={tool.id}><strong>#{tool.rank}</strong><div><h3>{tool.repo}</h3><p>{tool.oneLinePitchZh}</p><a href={tool.url} target="_blank" rel="noreferrer">查看仓库 ↗</a></div><span className="topic-tag">+{tool.starsToday ?? '—'} ★</span></article>)}</div></section>;
+}
+
+function ToolEditor({tool, onUpdate, onRegenerate}: {
+  tool: ToolCandidate; onUpdate: (id: string, patch: Partial<ToolCandidate>) => Promise<void>; onRegenerate: (id: string) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState(story);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => setDraft(story), [story]);
-  const save = async (confirmed = false) => {
+  const [draft, setDraft] = useState(tool); const [busy, setBusy] = useState(false);
+  useEffect(() => setDraft(tool), [tool]);
+  const save = async (confirmed: boolean) => {
     setBusy(true);
-    try { await onUpdate(story.id, {titleZh: draft.titleZh, summaryZh: draft.summaryZh, category: draft.category, selected: draft.selected, confirmed}); }
-    finally { setBusy(false); }
+    try { await onUpdate(tool.id, {
+      oneLinePitchZh: draft.oneLinePitchZh, toolType: draft.toolType, useCases: draft.useCases,
+      targetUsers: draft.targetUsers, quickStart: draft.quickStart, prerequisites: draft.prerequisites,
+      caveats: draft.caveats, selected: draft.selected, confirmed,
+    }); } finally { setBusy(false); }
   };
-  return <article className={`editor-card ${story.selected ? 'selected' : ''}`} draggable onDragStart={onDrag} onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
-    <div className="card-top"><span className="drag">⋮⋮</span><strong>#{String(index + 1).padStart(2, '0')}</strong><span className="score">评分 {story.score}</span><span className={`method ${story.generationMethod}`}>{story.generationMethod === 'llm' ? 'LLM + 规则' : '规则摘要'}</span><label className="pick"><input type="checkbox" checked={draft.selected} onChange={(event) => setDraft({...draft, selected: event.target.checked})}/>入选</label></div>
-    <div className="compare">
-      <section className="source-pane"><div className="eyebrow">原始证据</div><h3>{story.titleOriginal}</h3><p>{story.sources[0].content}</p><a href={story.sources[0].url} target="_blank" rel="noreferrer">{story.sources[0].sourceName} ↗</a></section>
-      <section className="edit-pane"><div className="edit-heading"><div className="eyebrow">成片文案</div><span className="topic-tag">{draft.category}</span></div><input value={draft.titleZh} onChange={(event) => setDraft({...draft, titleZh: event.target.value})}/><textarea value={draft.summaryZh} onChange={(event) => setDraft({...draft, summaryZh: event.target.value})}/></section>
-    </div>
-    {story.riskFlags.length > 0 && <div className="warning">⚠ {story.riskFlags.join(' · ')}</div>}
-    <div className="card-actions"><span className={story.confirmed ? 'confirmed' : 'pending'}>{story.confirmed ? '✓ 已确认' : '待确认'}</span><button onClick={() => onRegenerate(story.id)} disabled={busy}>LLM 优化此条</button><button onClick={() => save(false)} disabled={busy}>保存</button><button className="primary small" onClick={() => save(true)} disabled={busy}>保存并确认</button></div>
+  return <article className={`editor-card ${tool.selected ? 'selected' : ''}`}>
+    <div className="card-top"><strong>#{String(tool.rank).padStart(2, '0')}</strong><span className="score">实用性 {tool.utilityScore}</span><span className={`method ${tool.generationMethod}`}>{tool.generationMethod === 'llm' ? 'LLM + 证据' : '规则提炼'}</span><label className="pick"><input type="checkbox" checked={draft.selected} onChange={(event) => setDraft({...draft, selected: event.target.checked})}/>入选</label></div>
+    <div className="compare"><section className="source-pane"><div className="eyebrow">仓库证据</div><h3>{tool.repo}</h3><p>{tool.sources[0].content}</p><div className="repo-metrics"><span>{tool.language ?? '未知语言'}</span><span>{tool.license ?? '无许可证信息'}</span><span>{tool.totalStars?.toLocaleString() ?? '—'} Stars</span></div><a href={tool.url} target="_blank" rel="noreferrer">GitHub ↗</a>{tool.excludeReason && <div className="warning">非工具提示：{tool.excludeReason}</div>}</section>
+      <section className="edit-pane"><div className="edit-heading"><div className="eyebrow">推荐文案</div><select value={draft.toolType} onChange={(event) => setDraft({...draft, toolType: event.target.value as ToolType})}>{toolTypes.map((type) => <option key={type}>{type}</option>)}</select></div><input value={draft.oneLinePitchZh} onChange={(event) => setDraft({...draft, oneLinePitchZh: event.target.value})}/><label>使用场景（每行一项）</label><textarea value={draft.useCases.join('\n')} onChange={(event) => setDraft({...draft, useCases: lines(event.target.value)})}/><label>适合人群（每行一项）</label><textarea className="compact-textarea" value={draft.targetUsers.join('\n')} onChange={(event) => setDraft({...draft, targetUsers: lines(event.target.value)})}/><label>README 快速开始</label><textarea className="compact-textarea code-input" value={draft.quickStart ?? ''} onChange={(event) => setDraft({...draft, quickStart: event.target.value || undefined})}/><label>注意事项（每行一项）</label><textarea className="compact-textarea" value={draft.caveats.join('\n')} onChange={(event) => setDraft({...draft, caveats: lines(event.target.value)})}/></section></div>
+    {tool.riskFlags.length > 0 && <div className="warning">⚠ {tool.riskFlags.join(' · ')}</div>}
+    <div className="card-actions"><span className={tool.confirmed ? 'confirmed' : 'pending'}>{tool.confirmed ? '✓ 已确认' : '待确认'}</span><button onClick={() => onRegenerate(tool.id)} disabled={busy}>LLM 优化此项</button><button onClick={() => save(false)} disabled={busy}>保存</button><button className="primary small" onClick={() => save(true)} disabled={busy}>保存并确认</button></div>
   </article>;
-}
-
-function GithubPanel({stories}: {stories: CandidateStory[]}) {
-  return <section className="github-panel"><div className="section-title"><div><div className="eyebrow">GITHUB · DAILY</div><h2>GitHub 当天热榜前五</h2></div><span className="auto-badge">自动入选 · 无需审核</span></div><div className="github-grid">{stories.map((story, index) => <article key={story.id}><strong>{String(index + 1).padStart(2, '0')}</strong><div><h3>{story.titleZh}</h3><p>{story.summaryZh}</p><a href={story.sources[0].url} target="_blank" rel="noreferrer">{story.sources[0].sourceName} ↗</a></div><span className="topic-tag">{story.category}</span></article>)}</div>{stories.length !== 5 && <div className="warning">⚠ 当前日报没有完整的 GitHub Top 5，请重新运行 npm run daily 生成新版本。</div>}</section>;
 }
 
 export function App() {
   const startupError = new URLSearchParams(window.location.search).get('collectionError');
-  const [edition, setEdition] = useState<Edition>();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [minScore, setMinScore] = useState(0);
-  const [dragId, setDragId] = useState<string>();
-  const [job, setJob] = useState<RenderJob>();
-  const [optimizing, setOptimizing] = useState(false);
-  const [optimizationMessage, setOptimizationMessage] = useState('');
-
+  const [edition, setEdition] = useState<DiscoveryEdition>(); const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(''); const [minScore, setMinScore] = useState(0); const [toolsOnly, setToolsOnly] = useState(false);
+  const [job, setJob] = useState<RenderJob>(); const [optimizing, setOptimizing] = useState(false); const [optimizationMessage, setOptimizationMessage] = useState('');
   const loadLatest = async () => {
-    try { setEdition(await api<Edition>('/api/editions/latest')); }
-    catch (reason) { if (!(reason instanceof Error && reason.message === '暂无日报')) setError(reason instanceof Error ? reason.message : String(reason)); }
+    try { setEdition(await api<DiscoveryEdition>('/api/editions/latest')); }
+    catch (reason) { if (!(reason instanceof Error && reason.message === '暂无工具雷达日报')) setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setLoading(false); }
   };
   useEffect(() => { void loadLatest(); }, []);
   useEffect(() => {
     if (!job || ['completed', 'failed'].includes(job.status)) return;
-    const timer = window.setInterval(async () => {
-      const next = await api<RenderJob>(`/api/render-jobs/${job.id}`);
-      setJob(next);
-      if (['completed', 'failed'].includes(next.status)) void loadLatest();
-    }, 1500);
+    const timer = window.setInterval(async () => { const next = await api<RenderJob>(`/api/render-jobs/${job.id}`); setJob(next); if (['completed', 'failed'].includes(next.status)) void loadLatest(); }, 1500);
     return () => clearInterval(timer);
   }, [job?.id, job?.status]);
-
-  const github = (edition?.candidates ?? []).filter((item) => item.section === 'github' && item.selected).sort((a, b) => a.position - b.position).slice(0, 5);
-  const industry = (edition?.candidates ?? []).filter((item) => item.section === 'industry');
-  const filtered = useMemo(() => industry.filter((item) => item.score >= minScore), [industry, minScore]);
-  const selected = industry.filter((item) => item.selected).sort((a, b) => a.position - b.position);
-  const llmTargets = [...github, ...selected].filter((item) => item.generationMethod !== 'llm');
-  const estimatedInputChars = llmTargets.reduce((total, candidate) => total + candidate.sources.reduce(
-    (sourceTotal, source) => sourceTotal + source.title.length + Math.min(source.content.length, 1600), 0,
-  ), 0);
-
-  if (loading) return <main className="empty"><div className="loader" /><p>正在载入审核台…</p></main>;
-  if (startupError) return <main className="empty"><div className="empty-mark">!</div><h1>今日日报采集失败</h1><p className="startup-error">{startupError}</p><p>未使用过去日期的 GitHub 热榜，也未创建本期日报。请稍后重新运行 <code>npm run daily</code>。</p></main>;
-  if (!edition) return <EmptyState onCreated={setEdition} />;
-
-  const update = async (candidateId: string, patch: Partial<CandidateStory>) => {
-    const next = await api<Edition>(`/api/editions/${edition.id}/candidates/${candidateId}`, {method: 'PATCH', body: JSON.stringify(patch)});
-    setEdition(next); setError('');
-  };
-  const regenerate = async (candidateId: string) => {
-    try { setEdition(await api<Edition>(`/api/editions/${edition.id}/candidates/${candidateId}/regenerate`, {method: 'POST'})); }
+  const selected = (edition?.candidates ?? []).filter((item) => item.selected).sort((a, b) => a.position - b.position);
+  const filtered = useMemo(() => (edition?.candidates ?? []).filter((item) => item.utilityScore >= minScore && (!toolsOnly || item.toolLikely)), [edition, minScore, toolsOnly]);
+  const llmTargets = selected.filter((item) => item.generationMethod !== 'llm');
+  const estimatedChars = llmTargets.reduce((total, item) => total + Math.min(item.sources[0].content.length, 1600), 0);
+  if (loading) return <main className="empty"><div className="loader"/><p>正在载入审核台…</p></main>;
+  if (startupError) return <main className="empty"><div className="empty-mark">!</div><h1>今日工具采集失败</h1><p className="startup-error">{startupError}</p><p>未使用过去日期榜单，请稍后重新运行 <code>npm run daily</code>。</p></main>;
+  if (!edition) return <EmptyState onCreated={setEdition}/>;
+  const update = async (id: string, patch: Partial<ToolCandidate>) => { setEdition(await api<DiscoveryEdition>(`/api/editions/${edition.id}/candidates/${id}`, {method: 'PATCH', body: JSON.stringify(patch)})); setError(''); };
+  const regenerate = async (id: string) => {
+    if (!window.confirm('将调用一次 LLM 优化此工具。是否继续？')) return;
+    try { setEdition(await api<DiscoveryEdition>(`/api/editions/${edition.id}/candidates/${id}/regenerate`, {method: 'POST'})); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
-  const drop = async (targetId: string) => {
-    if (!dragId || dragId === targetId) return;
-    const ids = industry.sort((a,b) => a.position-b.position).map((item) => item.id);
-    const from = ids.indexOf(dragId); const to = ids.indexOf(targetId);
-    ids.splice(to, 0, ids.splice(from, 1)[0]);
-    setEdition(await api<Edition>(`/api/editions/${edition.id}/reorder`, {method: 'POST', body: JSON.stringify({candidateIds: ids})}));
-    setDragId(undefined);
+  const approve = async () => { try { setEdition(await api<DiscoveryEdition>(`/api/editions/${edition.id}/approve`, {method: 'POST'})); setError(''); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } };
+  const optimize = async () => {
+    if (!llmTargets.length || !window.confirm(`将调用 LLM 优化 ${llmTargets.length} 个入选工具，最多发送约 ${(estimatedChars / 1000).toFixed(1)}k 字符。是否继续？`)) return;
+    setOptimizing(true); setError('');
+    try { const result = await api<OptimizationResult>(`/api/editions/${edition.id}/optimize-selected`, {method: 'POST'}); setEdition(result.edition); setOptimizationMessage(`优化完成：成功 ${result.optimized}，规则回退 ${result.fallback}。`); if (result.warnings.length) setError(result.warnings.join('；')); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setOptimizing(false); }
   };
-  const approve = async () => {
-    try { setEdition(await api<Edition>(`/api/editions/${edition.id}/approve`, {method: 'POST'})); setError(''); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-  };
-  const optimizeSelected = async () => {
-    if (!llmTargets.length) return;
-    const estimate = `${llmTargets.length} 条、最多约 ${(estimatedInputChars / 1000).toFixed(1)}k 个源文本字符`;
-    if (!window.confirm(`将调用 LLM 优化当前已入选内容（${estimate}）。是否继续？`)) return;
-    setOptimizing(true); setError(''); setOptimizationMessage('');
-    try {
-      const result = await api<OptimizationResult>(`/api/editions/${edition.id}/optimize-selected`, {method: 'POST'});
-      setEdition(result.edition);
-      setOptimizationMessage(`LLM 按需优化完成：成功 ${result.optimized} 条，规则回退 ${result.fallback} 条；实际送入约 ${(result.inputChars / 1000).toFixed(1)}k 个源文本字符。`);
-      if (result.warnings.length) setError(`部分内容回退：${result.warnings.join('；')}`);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setOptimizing(false); }
-  };
-  const render = async () => {
-    try { setJob(await api<RenderJob>(`/api/editions/${edition.id}/render`, {method: 'POST'})); setError(''); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-  };
-
-  return <div className="app-shell">
-    <header className="app-header"><div><div className="brand"><span>AI</span> {edition.brand.name}</div><h1>{edition.date} 审核台</h1></div><div className="status-block"><span className={`status ${edition.status}`}>{edition.status}</span><small>v{edition.version} · {edition.candidates.length} 条候选</small></div></header>
-    <div className="toolbar"><label>行业候选最低评分 <input type="range" min="0" max="100" value={minScore} onChange={(event) => setMinScore(Number(event.target.value))}/><strong>{minScore}</strong></label><div className="toolbar-spacer"/><span>GitHub <b>{github.length}</b> / 5</span><span>行业概览 <b>{selected.length}</b> / 4</span><button onClick={optimizeSelected} disabled={edition.status !== 'draft' || optimizing || !llmTargets.length}>{optimizing ? 'LLM 优化中…' : `LLM 优化已入选（${llmTargets.length}）`}</button><button onClick={approve} disabled={edition.status !== 'draft'}>批准并锁定</button><button className="primary" onClick={render} disabled={edition.status !== 'approved'}>渲染 MP4</button></div>
-    {error && <div className="global-error">{error}<button onClick={() => setError('')}>x</button></div>}
-    {optimizationMessage && <div className="global-error" style={{background: '#ecfdf5', borderColor: '#a7f3d0', color: '#047857'}}>{optimizationMessage}<button onClick={() => setOptimizationMessage('')}>x</button></div>}
-    {job && <div className={`job ${job.status}`}><div><strong>渲染任务：{job.status}</strong><span>{job.error || job.outputPath || job.logs.at(-1)}</span></div><progress max="100" value={job.progress}/><b>{job.progress}%</b></div>}
-    <div className="workspace"><main className="candidate-list"><GithubPanel stories={github}/><div className="section-title industry-title"><div><div className="eyebrow">INDUSTRY · REVIEW</div><h2>行业概览候选</h2></div><span>请选择并确认 4 条</span></div>{filtered.map((story) => <EditorCard key={story.id} story={story} index={industry.indexOf(story)} total={industry.length} edition={edition} onUpdate={update} onRegenerate={regenerate} onDrag={() => setDragId(story.id)} onDrop={() => void drop(story.id)} />)}</main>
-      <aside className="preview-panel"><div className="preview-head"><div><div className="eyebrow">REMOTION · PLAYER</div><strong>完整成片预览</strong></div><span>{Math.round(totalDurationFrames(edition) / VIDEO_FPS)} 秒</span></div><div className="video-frame"><Player component={DailyReportVideo} inputProps={{edition, hasBgm: false}} durationInFrames={totalDurationFrames(edition)} fps={VIDEO_FPS} compositionWidth={VIDEO_WIDTH} compositionHeight={VIDEO_HEIGHT} controls loop clickToPlay style={{width: '100%', aspectRatio: '16 / 9'}} /></div><div className="preview-note">此处直接播放与 MP4 渲染相同的 Remotion 时间轴。审核阶段不加载 BGM，正式成片会按本地素材自动处理。</div></aside>
-    </div>
+  const render = async () => { try { setJob(await api<RenderJob>(`/api/editions/${edition.id}/render`, {method: 'POST'})); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } };
+  return <div className="app-shell"><header className="app-header"><div><div className="brand"><span>GH</span> {edition.brand.name}</div><h1>{edition.date} 审核台</h1></div><div className="status-block"><span className={`status ${edition.status}`}>{edition.status}</span><small>v{edition.version} · 全球榜 {edition.candidates.length} 项</small></div></header>
+    <div className="toolbar"><label>最低实用性 <input type="range" min="0" max="100" value={minScore} onChange={(event) => setMinScore(Number(event.target.value))}/><strong>{minScore}</strong></label><label><input type="checkbox" checked={toolsOnly} onChange={(event) => setToolsOnly(event.target.checked)}/>仅看工具候选</label><div className="toolbar-spacer"/><span>精选 <b>{selected.length}</b> / 3～5</span><button onClick={optimize} disabled={edition.status !== 'draft' || optimizing || !llmTargets.length}>{optimizing ? 'LLM 优化中…' : `LLM 优化已入选（${llmTargets.length}）`}</button><button onClick={approve} disabled={edition.status !== 'draft'}>批准并锁定</button><button className="primary" onClick={render} disabled={edition.status !== 'approved'}>渲染 MP4</button></div>
+    {error && <div className="global-error">{error}<button onClick={() => setError('')}>×</button></div>}{optimizationMessage && <div className="global-error success">{optimizationMessage}<button onClick={() => setOptimizationMessage('')}>×</button></div>}{job && <div className={`job ${job.status}`}><div><strong>渲染任务：{job.status}</strong><span>{job.error || job.outputPath || job.logs.at(-1)}</span></div><progress max="100" value={job.progress}/><b>{job.progress}%</b></div>}
+    <div className="workspace"><main className="candidate-list"><TrendingRadar tools={edition.candidates}/><div className="section-title industry-title"><div><div className="eyebrow">TOOLS · REVIEW</div><h2>工具候选</h2></div><span>精选并确认 3～5 个</span></div>{filtered.map((tool) => <ToolEditor key={tool.id} tool={tool} onUpdate={update} onRegenerate={regenerate}/>)}</main>
+      <aside className="preview-panel"><div className="preview-head"><div><div className="eyebrow">REMOTION · PLAYER</div><strong>完整成片预览</strong></div><span>{Math.round(totalDurationFrames(edition) / VIDEO_FPS)} 秒</span></div><div className="video-frame"><Player component={DailyReportVideo} inputProps={{edition, hasBgm: false}} durationInFrames={totalDurationFrames(edition)} fps={VIDEO_FPS} compositionWidth={VIDEO_WIDTH} compositionHeight={VIDEO_HEIGHT} controls loop clickToPlay style={{width: '100%', aspectRatio: '16 / 9'}}/></div><div className="preview-note">预览与正式 MP4 使用相同时间轴。项目没有被自动安装或运行，推荐依据仅来自公开仓库资料。</div></aside></div>
   </div>;
 }
-

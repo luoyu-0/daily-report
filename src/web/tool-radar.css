@@ -1,0 +1,34 @@
+.repo-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.repo-metrics span {
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: #eaf2ff;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.edit-heading select {
+  max-width: 150px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px;
+}
+
+.edit-pane label {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.edit-pane .compact-textarea { min-height: 68px; }
+.edit-pane .code-input { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+.global-error.success { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+.startup-error { max-width: 800px; color: #be123c !important; word-break: break-word; }

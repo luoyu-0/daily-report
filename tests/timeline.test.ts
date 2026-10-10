@@ -1,40 +1,46 @@
 import {describe, expect, it} from 'vitest';
-import type {CandidateStory, Edition} from '../src/shared/types.js';
+import type {DiscoveryEdition, ToolCandidate} from '../src/shared/types.js';
 import {buildTimeline, totalDurationFrames, VIDEO_FPS} from '../src/video/timeline.js';
 
-const story = (index: number, section: CandidateStory['section'] = 'industry', category = 'AI 产品与模型'): CandidateStory => ({
-  id: `s${index}`, editionId: 'e1', titleOriginal: `Story ${index}`, titleZh: `第 ${index} 条 AI 重要新闻`,
-  summaryZh: '这是一段用于测试阅读时长和视频时间轴的中文摘要。'.repeat(4), category: category as CandidateStory['category'], section,
-  score: 80, selected: true, confirmed: true, position: index,
-  sources: [{id: `src${index}`, sourceName: 'Official', title: `Source ${index}`, url: `https://example.com/${index}`, content: 'Evidence', fetchedAt: new Date().toISOString(), primarySource: true}],
-  evidence: ['E1: Evidence'], keyFacts: ['Evidence'], riskFlags: [], generationMethod: 'rule',
+const tool = (index: number): ToolCandidate => ({
+  id: `tool-${index}`, editionId: 'e1', repo: `owner/tool-${index}`, url: `https://github.com/owner/tool-${index}`,
+  rank: index + 1, starsToday: 100 - index, language: 'TypeScript', topics: ['developer-tools'], archived: false,
+  toolType: '开发工具', oneLinePitchZh: `第 ${index + 1} 个实用开发工具`, useCases: ['提升日常开发效率'], targetUsers: ['开发者'],
+  prerequisites: ['Node.js'], caveats: ['使用前请阅读项目文档'], utilityScore: 80, toolLikely: true,
+  selected: true, confirmed: true, position: index,
+  sources: [{id: `source-${index}`, sourceName: 'GitHub', title: `owner/tool-${index}`,
+    url: `https://github.com/owner/tool-${index}`, content: 'Repository evidence', fetchedAt: new Date().toISOString(), primarySource: true}],
+  evidence: ['E1: Repository evidence'], riskFlags: [], generationMethod: 'rule',
 });
 
-const edition: Edition = {
-  id: 'e1', date: '2026-10-09', version: 1, status: 'approved',
-  brand: {name: 'AI 智讯日报', tagline: '每日重点', background: '#F4F8FF', primary: '#2563EB', ink: '#0F172A', paleBlue: '#DBEAFE', accent: '#38BDF8'},
-  candidates: [
-    ...Array.from({length: 5}, (_, index) => story(index, 'github', '研究与开源')),
-    story(5), story(6, 'industry', '智能体与安全'), story(7), story(8, 'industry', '研究与开源'),
-  ],
+const edition: DiscoveryEdition = {
+  id: 'e1', kind: 'github-tools', date: '2026-10-10', version: 1, status: 'approved',
+  brand: {name: 'GitHub 工具雷达', tagline: '从今日热榜发现真正好用的工具', background: '#F4F8FF', primary: '#2563EB', ink: '#0F172A', paleBlue: '#DBEAFE', accent: '#38BDF8'},
+  candidates: Array.from({length: 4}, (_, index) => tool(index)),
   createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 };
 
 describe('视频时间轴', () => {
-  it('包含片头、目录、栏目、新闻和结尾', () => {
+  it('包含片头、热榜雷达、工具栏目和结尾', () => {
     const types = buildTimeline(edition).map((item) => item.type);
     expect(types[0]).toBe('intro');
-    expect(types).toContain('agenda');
-    expect(types).toContain('github');
+    expect(types).toContain('radar');
     expect(types.filter((item) => item === 'section')).toHaveLength(1);
-    expect(types.filter((item) => item === 'story')).toHaveLength(4);
+    expect(types.filter((item) => item === 'tool')).toHaveLength(4);
     expect(types.at(-1)).toBe('summary');
   });
 
-  it('GitHub Top 5 + 4 条行业概览的默认时长在 2～3 分钟内', () => {
+  it('默认四个精选工具的时长在 2～3 分钟内', () => {
     const seconds = totalDurationFrames(edition) / VIDEO_FPS;
     expect(seconds).toBeGreaterThanOrEqual(120);
     expect(seconds).toBeLessThanOrEqual(180);
   });
-});
 
+  it('允许的 3～5 个精选工具都保持在 2～3 分钟内', () => {
+    for (const count of [3, 5]) {
+      const seconds = totalDurationFrames({...edition, candidates: edition.candidates.slice(0, count)}) / VIDEO_FPS;
+      expect(seconds).toBeGreaterThanOrEqual(120);
+      expect(seconds).toBeLessThanOrEqual(180);
+    }
+  });
+});

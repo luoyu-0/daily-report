@@ -9,11 +9,11 @@ const arg = (name: string) => {
 const date = arg('--date') ?? currentChinaDate();
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('--date 必须为 YYYY-MM-DD');
 
-console.log(`正在创建 ${date} 的资讯候选…`);
+console.log(`正在读取 ${date} 的全球 GitHub Trending Today…`);
 try {
   const result = await buildCandidates(date);
-  console.log(`已创建 ${result.edition.id}，候选 ${result.edition.candidates.length} 条。`);
-  console.log('本次仅生成规则摘要，尚未调用 LLM；可在审核台按需优化已入选内容。');
+  console.log(`已创建 ${result.edition.id}，工具候选 ${result.edition.candidates.length} 条。`);
+  console.log('本次仅执行规则识别，尚未调用 LLM；可在审核台选定 3～5 个工具后按需优化。');
   if (result.warnings.length) console.warn(`警告：\n- ${result.warnings.join('\n- ')}`);
   if (process.argv.includes('--no-review')) {
     console.log('采集完成；已按 --no-review 跳过审核台启动。');
@@ -25,7 +25,7 @@ try {
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`日报创建失败：${message}`);
+  console.error(`工具雷达创建失败：${message}`);
   process.exitCode = 1;
   if (!process.argv.includes('--no-review')) {
     console.log('正在打开审核台显示失败原因…');

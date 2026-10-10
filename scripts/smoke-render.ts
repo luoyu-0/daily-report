@@ -1,20 +1,21 @@
 import {createEdition, newId, updateEditionStatus, upsertCandidate} from '../src/db.js';
 import {renderEdition} from '../src/render.js';
-import type {CandidateStory} from '../src/shared/types.js';
+import type {ToolCandidate} from '../src/shared/types.js';
 
 const edition = createEdition('2026-10-09');
-const story: CandidateStory = {
-  id: newId('story'), editionId: edition.id,
-  titleOriginal: 'OpenAI-compatible local workflow smoke test',
-  titleZh: '本地 AI 日报完成端到端渲染测试',
-  summaryZh: '该条目是本地渲染冒烟测试的固定数据。它用于验证白蓝品牌视觉、中文排版、页面转场、H.264 编码和 FFprobe 成片校验，不会进入正式日报。',
-  category: '研究与开源', section: 'industry', score: 88, selected: true, confirmed: true, position: 0,
+const story: ToolCandidate = {
+  id: newId('tool'), editionId: edition.id, repo: 'example/tool-radar-smoke', url: 'https://github.com/example/tool-radar-smoke',
+  rank: 1, starsToday: 100, totalStars: 1000, forks: 50, language: 'TypeScript', topics: ['developer-tools'],
+  license: 'MIT', archived: false, toolType: '开发工具', oneLinePitchZh: '用于验证 GitHub 工具雷达视频渲染链路的固定测试项目。',
+  useCases: ['验证中文排版与页面转场'], targetUsers: ['开发者'], quickStart: 'npm install tool-radar-smoke',
+  prerequisites: ['Node.js'], caveats: ['仅用于本地冒烟测试'], utilityScore: 88, toolLikely: true,
+  selected: true, confirmed: true, position: 0,
   sources: [{
-    id: 'smoke-source', sourceName: '本地测试', title: '渲染冒烟测试',
-    url: 'https://example.com/smoke', content: '固定的本地测试证据，不进行任何外部发布。',
+    id: 'smoke-source', sourceName: 'GitHub', title: 'example/tool-radar-smoke',
+    url: 'https://github.com/example/tool-radar-smoke', content: '固定的本地测试证据。npm install tool-radar-smoke',
     fetchedAt: new Date().toISOString(), primarySource: true,
   }],
-  evidence: ['E1: 固定的本地测试证据'], keyFacts: ['验证视频渲染链路'], riskFlags: [], generationMethod: 'rule',
+  evidence: ['E1: 固定的本地测试证据'], riskFlags: [], generationMethod: 'rule',
 };
 upsertCandidate(story);
 updateEditionStatus(edition.id, 'approved');

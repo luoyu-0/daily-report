@@ -10,133 +10,120 @@ import {
   updateEditionStatus, upsertCandidate,
 } from './db.js';
 import {buildCandidates, mapWithConcurrency} from './pipeline/run.js';
-import {enrichWithLlm} from './pipeline/llm.js';
-import {candidateStorySchema} from './shared/types.js';
+import {enrichToolWithLlm} from './pipeline/llm.js';
+import {toolCandidateSchema, type DiscoveryEdition} from './shared/types.js';
 import {renderEdition} from './render.js';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const editSchema = candidateStorySchema.pick({
-  titleZh: true, summaryZh: true, category: true, selected: true, confirmed: true,
+const editSchema = toolCandidateSchema.pick({
+  oneLinePitchZh: true, toolType: true, useCases: true, targetUsers: true, quickStart: true,
+  prerequisites: true, caveats: true, selected: true, confirmed: true,
 }).partial();
+
+const discoveryEdition = (id: string): DiscoveryEdition | undefined => {
+  const edition = getEdition(id);
+  return edition?.kind === 'github-tools' ? edition : undefined;
+};
+
+export function validateApproval(edition: DiscoveryEdition): string | undefined {
+  const selected = edition.candidates.filter((item) => item.selected);
+  if (selected.length < 3 || selected.length > 5) return '每日精选必须选择 3～5 个工具';
+  if (selected.some((item) => !item.confirmed)) return '入选工具必须逐条确认';
+  if (selected.some((item) => !item.sources.length || !item.evidence.length)) return '入选工具缺少来源或证据';
+  if (selected.some((item) => !item.oneLinePitchZh.trim() || !item.useCases.length || !item.targetUsers.length)) {
+    return '入选工具必须填写推荐语、使用场景和适合人群';
+  }
+  return undefined;
+}
 
 export async function createApp(serveWeb = false) {
   const app = Fastify({logger: true, bodyLimit: 1_000_000});
 
   app.get('/api/health', async () => ({ok: true, time: new Date().toISOString()}));
-  app.get('/api/editions/latest', async (_, reply) => getLatestEdition() ?? reply.code(404).send({error: '暂无日报'}));
-  app.get('/api/editions/:id', async (request, reply) => {
-    const edition = getEdition((request.params as {id: string}).id);
-    return edition ?? reply.code(404).send({error: '日报不存在'});
-  });
+  app.get('/api/editions/latest', async (_, reply) => getLatestEdition() ?? reply.code(404).send({error: '暂无工具雷达日报'}));
+  app.get('/api/editions/:id', async (request, reply) => getEdition((request.params as {id: string}).id) ?? reply.code(404).send({error: '日报不存在'}));
   app.get('/api/editions/:id/events', async (request, reply) => {
     const id = (request.params as {id: string}).id;
     return getEdition(id) ? getEditionEvents(id) : reply.code(404).send({error: '日报不存在'});
   });
   app.post('/api/editions', async (request, reply) => {
     const body = z.object({date: dateSchema}).parse(request.body);
-    try {
-      const result = await buildCandidates(body.date);
-      return reply.code(201).send(result);
-    } catch (error) {
-      return reply.code(502).send({error: error instanceof Error ? error.message : String(error)});
-    }
+    try { return reply.code(201).send(await buildCandidates(body.date)); }
+    catch (error) { return reply.code(502).send({error: error instanceof Error ? error.message : String(error)}); }
   });
   app.patch('/api/editions/:id/candidates/:candidateId', async (request, reply) => {
     const {id, candidateId} = request.params as {id: string; candidateId: string};
-    let edition = getEdition(id);
-    if (!edition) return reply.code(404).send({error: '日报不存在'});
-    if (edition.status !== 'draft') edition = forkEdition(edition.id);
-    const candidate = edition.candidates.find((item) => item.id === candidateId)
-      ?? (edition.parentId ? edition.candidates.find((item) => item.titleOriginal === getEdition(id)?.candidates.find((old) => old.id === candidateId)?.titleOriginal) : undefined);
-    if (!candidate) return reply.code(404).send({error: '候选新闻不存在'});
+    const sourceEdition = discoveryEdition(id);
+    if (!sourceEdition) return reply.code(404).send({error: '工具日报不存在'});
+    const originalRepo = sourceEdition.candidates.find((item) => item.id === candidateId)?.repo;
+    const edition = sourceEdition.status === 'draft' ? sourceEdition : forkEdition(sourceEdition.id);
+    const candidate = edition.candidates.find((item) => item.id === candidateId || item.repo === originalRepo);
+    if (!candidate) return reply.code(404).send({error: '候选工具不存在'});
     const patch = editSchema.parse(request.body);
     upsertCandidate({...candidate, ...patch, confirmed: patch.confirmed ?? false});
-    logEvent(edition.id, 'review', `更新候选：${candidate.titleOriginal}`, {candidateId: candidate.id, confirmed: patch.confirmed ?? false});
-    return getEdition(edition.id);
+    logEvent(edition.id, 'review', `更新工具：${candidate.repo}`, {candidateId: candidate.id, confirmed: patch.confirmed ?? false});
+    return discoveryEdition(edition.id);
   });
   app.post('/api/editions/:id/reorder', async (request, reply) => {
-    const sourceEdition = getEdition((request.params as {id: string}).id);
-    let edition = sourceEdition;
-    if (!edition) return reply.code(404).send({error: '日报不存在'});
-    if (edition.status !== 'draft') edition = forkEdition(edition.id);
+    const sourceEdition = discoveryEdition((request.params as {id: string}).id);
+    if (!sourceEdition) return reply.code(404).send({error: '工具日报不存在'});
+    const edition = sourceEdition.status === 'draft' ? sourceEdition : forkEdition(sourceEdition.id);
     const {candidateIds} = z.object({candidateIds: z.array(z.string())}).parse(request.body);
     if (new Set(candidateIds).size !== candidateIds.length) return reply.code(400).send({error: '排序中存在重复 ID'});
-    const translatedIds = candidateIds.map((candidateId) => {
-      if (edition!.candidates.some((item) => item.id === candidateId)) return candidateId;
-      const originalTitle = sourceEdition?.candidates.find((item) => item.id === candidateId)?.titleOriginal;
-      return edition!.candidates.find((item) => item.titleOriginal === originalTitle)?.id;
-    }).filter((id): id is string => Boolean(id));
-    const order = new Map(translatedIds.map((candidateId, index) => [candidateId, index]));
-    edition.candidates.forEach((candidate) => upsertCandidate({...candidate, position: order.get(candidate.id) ?? candidate.position + candidateIds.length}));
-    logEvent(edition.id, 'review', '调整候选排序', {candidateIds: translatedIds});
-    return getEdition(edition.id);
+    const repos = candidateIds.map((candidateId) => sourceEdition.candidates.find((item) => item.id === candidateId)?.repo);
+    const ids = repos.map((repo) => edition.candidates.find((item) => item.repo === repo)?.id).filter((id): id is string => Boolean(id));
+    const order = new Map(ids.map((candidateId, index) => [candidateId, index]));
+    edition.candidates.forEach((candidate) => upsertCandidate({...candidate, position: order.get(candidate.id) ?? candidate.position + ids.length}));
+    logEvent(edition.id, 'review', '调整工具排序', {candidateIds: ids});
+    return discoveryEdition(edition.id);
   });
   app.post('/api/editions/:id/candidates/:candidateId/regenerate', async (request, reply) => {
-    let edition = getEdition((request.params as {id: string; candidateId: string}).id);
-    if (!edition) return reply.code(404).send({error: '日报不存在'});
-    if (edition.status !== 'draft') edition = forkEdition(edition.id);
-    const requestedId = (request.params as {candidateId: string}).candidateId;
-    const sourceTitle = getEdition((request.params as {id: string}).id)?.candidates.find((item) => item.id === requestedId)?.titleOriginal;
-    const candidate = edition.candidates.find((item) => item.id === requestedId || item.titleOriginal === sourceTitle);
-    if (!candidate) return reply.code(404).send({error: '候选新闻不存在'});
-    const enriched = await enrichWithLlm(candidate.sources);
-    upsertCandidate({...candidate, ...enriched.story, generationMethod: enriched.method, confirmed: false});
-    logEvent(edition.id, 'enrichment', `重新生成：${candidate.titleOriginal}`, {candidateId: candidate.id, method: enriched.method, warning: enriched.warning});
-    return getEdition(edition.id);
+    const {id, candidateId} = request.params as {id: string; candidateId: string};
+    const sourceEdition = discoveryEdition(id);
+    if (!sourceEdition) return reply.code(404).send({error: '工具日报不存在'});
+    const originalRepo = sourceEdition.candidates.find((item) => item.id === candidateId)?.repo;
+    const edition = sourceEdition.status === 'draft' ? sourceEdition : forkEdition(sourceEdition.id);
+    const candidate = edition.candidates.find((item) => item.id === candidateId || item.repo === originalRepo);
+    if (!candidate) return reply.code(404).send({error: '候选工具不存在'});
+    const enriched = await enrichToolWithLlm(candidate);
+    upsertCandidate({...candidate, ...enriched.tool, generationMethod: enriched.method, confirmed: false});
+    logEvent(edition.id, 'enrichment', `重新提炼：${candidate.repo}`, {candidateId: candidate.id, method: enriched.method, warning: enriched.warning});
+    return discoveryEdition(edition.id);
   });
   app.post('/api/editions/:id/optimize-selected', async (request, reply) => {
-    let edition = getEdition((request.params as {id: string}).id);
-    if (!edition) return reply.code(404).send({error: '日报不存在'});
+    const sourceEdition = discoveryEdition((request.params as {id: string}).id);
+    if (!sourceEdition) return reply.code(404).send({error: '工具日报不存在'});
     if (!config.llm.apiKey || !config.llm.model) return reply.code(400).send({error: '尚未配置 LLM API key 或模型'});
-    if (edition.status !== 'draft') edition = forkEdition(edition.id);
-    const industry = edition.candidates.filter((item) => item.section === 'industry' && item.selected);
-    if (industry.length > 4) return reply.code(400).send({error: '请先将行业概览控制在 4 条以内，再进行 LLM 优化'});
+    const edition = sourceEdition.status === 'draft' ? sourceEdition : forkEdition(sourceEdition.id);
     const targets = edition.candidates.filter((item) => item.selected && item.generationMethod !== 'llm');
-    if (targets.length > 9) return reply.code(400).send({error: '单次最多优化 9 条，请减少入选内容'});
+    if (targets.length > 5) return reply.code(400).send({error: '单次最多优化 5 个工具'});
     if (!targets.length) return {edition, requested: 0, optimized: 0, fallback: 0, inputChars: 0, warnings: []};
-
     const warnings: string[] = [];
-    let optimized = 0;
-    let fallback = 0;
-    const inputChars = targets.reduce((total, candidate) => total + candidate.sources.reduce(
-      (sourceTotal, source) => sourceTotal + source.title.length + Math.min(source.content.length, config.llm.evidenceMaxChars), 0,
-    ), 0);
+    let optimized = 0; let fallback = 0;
+    const inputChars = targets.reduce((total, candidate) => total + Math.min(candidate.sources[0].content.length, config.llm.evidenceMaxChars), 0);
     await mapWithConcurrency(targets, Math.min(2, config.llm.concurrency), async (candidate) => {
-      const enriched = await enrichWithLlm(candidate.sources);
+      const enriched = await enrichToolWithLlm(candidate);
       if (enriched.method === 'llm') optimized += 1;
-      else {
-        fallback += 1;
-        if (enriched.warning) warnings.push(`${candidate.titleOriginal}：${enriched.warning}`);
-      }
-      upsertCandidate({
-        ...candidate,
-        ...enriched.story,
-        generationMethod: enriched.method,
-        confirmed: candidate.section === 'github',
-      });
-      logEvent(edition!.id, 'enrichment', `按需优化：${candidate.titleOriginal}`, {
-        candidateId: candidate.id, method: enriched.method, warning: enriched.warning,
-      });
+      else { fallback += 1; if (enriched.warning) warnings.push(`${candidate.repo}：${enriched.warning}`); }
+      upsertCandidate({...candidate, ...enriched.tool, generationMethod: enriched.method, confirmed: false});
+      logEvent(edition.id, 'enrichment', `按需优化：${candidate.repo}`, {candidateId: candidate.id, method: enriched.method, warning: enriched.warning});
     });
-    return {edition: getEdition(edition.id)!, requested: targets.length, optimized, fallback, inputChars, warnings};
+    return {edition: discoveryEdition(edition.id)!, requested: targets.length, optimized, fallback, inputChars, warnings};
   });
   app.post('/api/editions/:id/approve', async (request, reply) => {
-    const edition = getEdition((request.params as {id: string}).id);
-    if (!edition) return reply.code(404).send({error: '日报不存在'});
+    const edition = discoveryEdition((request.params as {id: string}).id);
+    if (!edition) return reply.code(404).send({error: '工具日报不存在'});
     if (edition.status !== 'draft') return reply.code(409).send({error: '只能批准草稿'});
-    const github = edition.candidates.filter((item) => item.section === 'github' && item.selected);
-    const selected = edition.candidates.filter((item) => item.section === 'industry' && item.selected);
-    if (github.length !== 5) return reply.code(400).send({error: 'GitHub 当天热榜必须包含前 5 条'});
-    if (selected.length !== 4) return reply.code(400).send({error: '行业概览必须选择 4 条新闻'});
-    if (selected.some((item) => !item.confirmed)) return reply.code(400).send({error: '行业概览的入选新闻必须逐条确认'});
-    if ([...github, ...selected].some((item) => !item.sources.length || !item.evidence.length)) return reply.code(400).send({error: '入选内容缺少来源或证据'});
+    const approvalError = validateApproval(edition);
+    if (approvalError) return reply.code(400).send({error: approvalError});
+    const selected = edition.candidates.filter((item) => item.selected);
     const approved = updateEditionStatus(edition.id, 'approved');
-    logEvent(edition.id, 'approval', '人工批准并锁定日报', {githubIds: github.map((item) => item.id), selectedIds: selected.map((item) => item.id)});
+    logEvent(edition.id, 'approval', '人工批准并锁定工具日报', {selectedIds: selected.map((item) => item.id)});
     return approved;
   });
   app.post('/api/editions/:id/render', async (request, reply) => {
-    const edition = getEdition((request.params as {id: string}).id);
-    if (!edition) return reply.code(404).send({error: '日报不存在'});
+    const edition = discoveryEdition((request.params as {id: string}).id);
+    if (!edition) return reply.code(404).send({error: '工具日报不存在'});
     if (edition.status !== 'approved') return reply.code(409).send({error: '只有已批准日报才能渲染'});
     const job = createRenderJob(edition.id);
     void renderEdition(edition.id, job).catch((error) => app.log.error(error));
@@ -160,4 +147,3 @@ export async function startServer(port = config.appPort, serveWeb = process.env.
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   startServer().catch((error) => { console.error(error); process.exitCode = 1; });
 }
-

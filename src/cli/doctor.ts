@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import {chromium} from 'playwright';
 import ffmpegPath from 'ffmpeg-static';
 import ffprobe from 'ffprobe-static';
 import {config} from '../config.js';
 
 const checks: Array<{name: string; ok: boolean; detail: string}> = [];
+fs.mkdirSync(config.dataDir, {recursive: true});
+fs.mkdirSync(config.outputDir, {recursive: true});
 const nodeMajor = Number(process.versions.node.split('.')[0]);
 checks.push({name: 'Node.js', ok: nodeMajor >= 20, detail: process.version});
 checks.push({name: 'FFmpeg', ok: Boolean(ffmpegPath && fs.existsSync(ffmpegPath)), detail: ffmpegPath || '未找到'});
@@ -37,10 +38,15 @@ try {
 } catch (error) {
   checks.push({name: 'GitHub Trending', ok: false, detail: error instanceof Error ? error.message : String(error)});
 }
-fs.mkdirSync(config.dataDir, {recursive: true});
-fs.mkdirSync(config.outputDir, {recursive: true});
-checks.push({name: '可用磁盘', ok: os.freemem() > 512 * 1024 * 1024, detail: `系统可用内存 ${(os.freemem() / 1024 ** 3).toFixed(1)} GB；输出目录 ${path.relative(config.rootDir, config.outputDir)}`});
-checks.push({name: 'LLM', ok: Boolean(config.llm.apiKey && config.llm.model), detail: config.llm.apiKey && config.llm.model ? `已配置 ${config.llm.model}` : '未配置，将使用规则摘要'});
+try {
+  const disk = fs.statfsSync(config.outputDir);
+  const freeBytes = disk.bavail * disk.bsize;
+  checks.push({name: '可用磁盘', ok: freeBytes > 512 * 1024 * 1024, detail: `${(freeBytes / 1024 ** 3).toFixed(1)} GB；输出目录 ${path.relative(config.rootDir, config.outputDir)}`});
+} catch {
+  checks.push({name: '可用磁盘', ok: false, detail: `无法读取 ${path.relative(config.rootDir, config.outputDir)}`});
+}
+checks.push({name: 'GitHub API', ok: true, detail: config.github.token ? '已配置 Token，可提高限额' : '未配置 Token，使用匿名限额与本地缓存'});
+checks.push({name: 'LLM', ok: Boolean(config.llm.apiKey && config.llm.model), detail: config.llm.apiKey && config.llm.model ? `已配置 ${config.llm.model}` : '未配置，仅使用规则提炼'});
 for (const item of checks) console.log(`${item.ok ? '✓' : item.name === 'LLM' ? '!' : '✗'} ${item.name}: ${item.detail}`);
 if (checks.some((item) => !item.ok && item.name !== 'LLM')) process.exitCode = 1;
 

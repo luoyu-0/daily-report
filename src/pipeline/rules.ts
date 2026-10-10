@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import type {SourceRecord, StoryCategory} from '../shared/types.js';
+import type {SourceRecord, StoryCategory, ToolType} from '../shared/types.js';
+import type {RepositoryProfile} from './collectors.js';
 
 export const stripHtml = (value: string) => value
   .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -91,4 +92,54 @@ export function stableSourceId(url: string): string {
 
 export const numericTokens = (value: string): string[] => Array.from(value.match(/\b\d+(?:[.,]\d+)?%?\b/g) ?? []);
 export const latinEntities = (value: string): string[] => Array.from(value.match(/\b[A-Z][A-Za-z0-9.+-]{2,}\b/g) ?? []);
+
+const nonToolPattern = /\b(awesome|curated\s+list|roadmap|interview questions|course|tutorial|paper|dataset|newsletter|weekly)\b|教程|课程|论文|数据集|周刊|资源列表/i;
+const toolPattern = /\b(cli|command.line|desktop|app|tool|framework|library|sdk|server|client|editor|agent|automation|workflow|browser|plugin|extension|generator|monitor|dashboard|api|platform|runtime|compiler|proxy|gateway|database)\b|工具|客户端|桌面|自动化|工作流|插件|扩展|生成器|编辑器|平台|框架/i;
+
+export function classifyTool(profile: RepositoryProfile): ToolType {
+  const text = `${profile.description} ${profile.topics.join(' ')} ${profile.readme.slice(0, 5_000)}`.toLowerCase();
+  if (/\b(electron|desktop|tauri|windows|macos|linux app)\b|桌面/.test(text)) return '桌面应用';
+  if (/\b(cli|command.line|terminal|tui)\b|命令行/.test(text)) return 'CLI';
+  if (/\b(agent|agentic|mcp)\b|智能体/.test(text)) return 'Agent';
+  if (/\b(automation|workflow|orchestrat|pipeline)\b|自动化|工作流/.test(text)) return '自动化';
+  if (/\b(web app|browser|dashboard|website|self.hosted)\b|网页|浏览器/.test(text)) return 'Web 工具';
+  if (/\b(sdk|framework|library|package|runtime)\b|框架|开发库/.test(text)) return '框架与库';
+  if (/\b(editor|debug|developer|devtool|compiler|proxy|gateway|monitor)\b|开发工具|编辑器/.test(text)) return '开发工具';
+  return '其他';
+}
+
+export function extractQuickStart(readme: string): string | undefined {
+  if (!readme) return undefined;
+  const section = readme.match(/(?:^|\n)#{1,3}\s*(?:quick\s*start|getting\s*started|installation|install|usage|快速开始|安装|使用)[^\n]*\n([\s\S]{0,2500})/i)?.[1] ?? readme.slice(0, 3_000);
+  const code = section.match(/```(?:bash|sh|shell|powershell|zsh|cmd)?\s*\n([\s\S]*?)```/i)?.[1]?.trim();
+  return code ? code.slice(0, 600) : undefined;
+}
+
+export function assessTool(profile: RepositoryProfile) {
+  const corpus = `${profile.repo} ${profile.description} ${profile.topics.join(' ')} ${profile.readme.slice(0, 8_000)}`;
+  const quickStart = extractQuickStart(profile.readme);
+  const excluded = nonToolPattern.test(corpus);
+  const positive = toolPattern.test(corpus);
+  const toolLikely = !profile.archived && !excluded && positive;
+  let score = 20;
+  score += Math.max(0, 18 - (profile.rank - 1));
+  score += Math.min(15, Math.round(Math.log10((profile.starsToday ?? 0) + 1) * 6));
+  score += positive ? 18 : 4;
+  score += quickStart ? 14 : 0;
+  score += profile.license ? 8 : 0;
+  score += profile.readme.length > 1_000 ? 5 : 0;
+  if (profile.archived) score -= 35;
+  if (excluded) score -= 30;
+  const utilityScore = Math.max(0, Math.min(100, Math.round(score)));
+  const excludeReason = profile.archived ? '仓库已归档'
+    : excluded ? '更像资讯、教程、论文或资源列表，而不是可直接使用的工具'
+      : !positive ? '暂未从描述和 README 中识别出明确的工具入口' : undefined;
+  const riskFlags = [
+    ...(profile.metadataWarning ? [profile.metadataWarning] : []),
+    ...(!profile.license ? ['未识别到开源许可证'] : []),
+    ...(!quickStart ? ['未提取到明确的快速开始命令'] : []),
+    ...(profile.archived ? ['仓库已归档'] : []),
+  ];
+  return {toolType: classifyTool(profile), toolLikely, utilityScore, excludeReason, quickStart, riskFlags};
+}
 

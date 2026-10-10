@@ -7,6 +7,7 @@ output-smoke/
 .env
 data/*.db*
 data/logs/
+data/github-profile-cache.json
 output/*.mp4
 output/*.json
 public/assets/audio/*.mp3

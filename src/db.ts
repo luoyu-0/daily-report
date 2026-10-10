@@ -3,10 +3,12 @@ import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
 import {config} from './config.js';
 import {
-  candidateStorySchema,
+  legacyCandidateStorySchema,
+  toolCandidateSchema,
   editionSchema,
-  type CandidateStory,
+  type CandidateStory, type DiscoveryEdition,
   type Edition,
+  type ToolCandidate,
   type RenderJob,
   renderJobSchema,
 } from './shared/types.js';
@@ -26,6 +28,7 @@ sqlite.exec(`
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     approved_at TEXT,
+    kind TEXT NOT NULL DEFAULT 'ai-news',
     UNIQUE(date, version)
   );
   CREATE TABLE IF NOT EXISTS candidates (
@@ -49,11 +52,16 @@ sqlite.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_audit_edition ON audit_events(edition_id, created_at);
 `);
+const editionColumns = sqlite.prepare('PRAGMA table_info(editions)').all() as Array<{name: string}>;
+if (!editionColumns.some((column) => column.name === 'kind')) {
+  sqlite.exec("ALTER TABLE editions ADD COLUMN kind TEXT NOT NULL DEFAULT 'ai-news'");
+}
 
 const now = () => new Date().toISOString();
 const newId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 function hydrateEdition(row: Record<string, unknown>): Edition {
+  const kind = row.kind === 'github-tools' ? 'github-tools' : 'ai-news';
   const candidates = sqlite
     .prepare('SELECT payload_json FROM candidates WHERE edition_id = ?')
     .all(row.id)
@@ -64,11 +72,12 @@ function hydrateEdition(row: Record<string, unknown>): Edition {
         raw.selected = true;
         raw.confirmed = true;
       }
-      return candidateStorySchema.parse(raw);
+      return kind === 'github-tools' ? toolCandidateSchema.parse(raw) : legacyCandidateStorySchema.parse(raw);
     })
     .sort((a, b) => a.position - b.position);
   return editionSchema.parse({
     id: row.id,
+    kind,
     date: row.date,
     version: row.version,
     parentId: row.parent_id || undefined,
@@ -81,10 +90,12 @@ function hydrateEdition(row: Record<string, unknown>): Edition {
   });
 }
 
-export function createEdition(date: string, candidates: CandidateStory[] = []): Edition {
+export function createEdition(date: string, candidates: ToolCandidate[] = []): DiscoveryEdition {
+  // 旧版与新版共享 (date, version) 唯一约束，因此版本号必须跨类型递增。
   const latest = sqlite.prepare('SELECT MAX(version) AS version FROM editions WHERE date = ?').get(date) as {version?: number};
-  const edition: Edition = {
+  const edition: DiscoveryEdition = {
     id: newId('edition'),
+    kind: 'github-tools',
     date,
     version: (latest.version ?? 0) + 1,
     status: 'draft',
@@ -95,13 +106,13 @@ export function createEdition(date: string, candidates: CandidateStory[] = []): 
   };
   const insert = sqlite.transaction(() => {
     sqlite.prepare(`INSERT INTO editions
-      (id,date,version,parent_id,status,brand_json,created_at,updated_at,approved_at)
-      VALUES (@id,@date,@version,NULL,@status,@brand,@createdAt,@updatedAt,NULL)`)
+      (id,date,version,parent_id,status,brand_json,created_at,updated_at,approved_at,kind)
+      VALUES (@id,@date,@version,NULL,@status,@brand,@createdAt,@updatedAt,NULL,@kind)`)
       .run({...edition, brand: JSON.stringify(edition.brand)});
     for (const candidate of candidates) upsertCandidate({...candidate, editionId: edition.id});
   });
   insert();
-  return getEdition(edition.id)!;
+  return getEdition(edition.id)! as DiscoveryEdition;
 }
 
 export function getEdition(id: string): Edition | undefined {
@@ -109,13 +120,15 @@ export function getEdition(id: string): Edition | undefined {
   return row ? hydrateEdition(row) : undefined;
 }
 
-export function getLatestEdition(): Edition | undefined {
-  const row = sqlite.prepare('SELECT * FROM editions ORDER BY date DESC, version DESC LIMIT 1').get() as Record<string, unknown> | undefined;
-  return row ? hydrateEdition(row) : undefined;
+export function getLatestEdition(): DiscoveryEdition | undefined {
+  const row = sqlite.prepare("SELECT * FROM editions WHERE kind = 'github-tools' ORDER BY date DESC, version DESC LIMIT 1").get() as Record<string, unknown> | undefined;
+  if (!row) return undefined;
+  const edition = hydrateEdition(row);
+  return edition.kind === 'github-tools' ? edition : undefined;
 }
 
-export function upsertCandidate(candidate: CandidateStory): void {
-  const parsed = candidateStorySchema.parse(candidate);
+export function upsertCandidate(candidate: CandidateStory | ToolCandidate): void {
+  const parsed = 'repo' in candidate ? toolCandidateSchema.parse(candidate) : legacyCandidateStorySchema.parse(candidate);
   sqlite.prepare(`INSERT INTO candidates (id,edition_id,payload_json) VALUES (?,?,?)
     ON CONFLICT(id) DO UPDATE SET edition_id=excluded.edition_id,payload_json=excluded.payload_json`)
     .run(parsed.id, parsed.editionId, JSON.stringify(parsed));
@@ -129,15 +142,16 @@ export function updateEditionStatus(id: string, status: Edition['status']): Edit
   return getEdition(id)!;
 }
 
-export function forkEdition(sourceId: string): Edition {
+export function forkEdition(sourceId: string): DiscoveryEdition {
   const source = getEdition(sourceId);
   if (!source) throw new Error('日报不存在');
+  if (source.kind !== 'github-tools') throw new Error('旧版资讯日报不支持继续编辑');
   const fork = createEdition(source.date);
   sqlite.prepare('UPDATE editions SET parent_id=? WHERE id=?').run(source.id, fork.id);
   for (const item of source.candidates) {
-    upsertCandidate({...item, id: newId('story'), editionId: fork.id, confirmed: false});
+    upsertCandidate({...item, id: newId('tool'), editionId: fork.id, confirmed: false});
   }
-  return getEdition(fork.id)!;
+  return getEdition(fork.id)! as DiscoveryEdition;
 }
 
 export function saveRenderJob(job: RenderJob): void {

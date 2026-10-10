@@ -24,9 +24,14 @@ export const config = {
     concurrency: Math.max(1, Math.min(3, Number(process.env.LLM_CONCURRENCY ?? 2))),
     evidenceMaxChars: Math.max(500, Math.min(3_500, Number(process.env.LLM_EVIDENCE_MAX_CHARS ?? 1_600))),
   },
+  github: {
+    token: process.env.GITHUB_TOKEN || '',
+    candidateLimit: Math.max(5, Math.min(25, Number(process.env.GITHUB_CANDIDATE_LIMIT ?? 15))),
+    cacheHours: Math.max(1, Math.min(72, Number(process.env.GITHUB_CACHE_HOURS ?? 12))),
+  },
   brand: brandConfigSchema.parse({
-    name: 'AI 智讯日报',
-    tagline: '筛选当日重要 AI 进展',
+    name: 'GitHub 工具雷达',
+    tagline: '每天从全球热榜发现值得一试的工具',
     background: '#F4F8FF',
     primary: '#2563EB',
     ink: '#0F172A',
