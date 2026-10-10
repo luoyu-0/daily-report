@@ -53,7 +53,7 @@
 
 `scripts/run-daily.ps1` 可供 Windows Task Scheduler 调用。本项目不会自动创建系统任务；建议将脚本设为每日北京时间 07:30 执行。
 
-GitHub 热榜读取官方 Trending 页面的 `Today`、`Spoken Language: Chinese` 榜单，并严格按页面顺序取前五。该筛选没有可验证的同口径备用源；官方页面不可访问或不足 5 条时，本次采集会明确失败，并在控制台与审核台说明原因，不会改用全球榜或历史榜单。
+GitHub 热榜优先读取 GitHub 官方 Trending 页面；本机网络无法访问该页面时，仅在 `mshibanami/GitHubTrendingRSS` 社区镜像明确标注了目标日期时才使用备用数据。备用源仍是过去日期、缺少日期或不足 5 条时，本次采集会明确失败，并在控制台与审核台说明原因，不会沿用历史榜单。
 
 ## 质量与安全约束
 
