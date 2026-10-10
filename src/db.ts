@@ -5,10 +5,12 @@ import {config} from './config.js';
 import {
   legacyCandidateStorySchema,
   toolCandidateSchema,
+  toolEnrichmentSchema,
   editionSchema,
   type CandidateStory, type DiscoveryEdition,
   type Edition,
   type ToolCandidate,
+  type ToolEnrichment,
   type RenderJob,
   renderJobSchema,
 } from './shared/types.js';
@@ -51,6 +53,12 @@ sqlite.exec(`
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_audit_edition ON audit_events(edition_id, created_at);
+  CREATE TABLE IF NOT EXISTS tool_enrichment_cache (
+    cache_key TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 const editionColumns = sqlite.prepare('PRAGMA table_info(editions)').all() as Array<{name: string}>;
 if (!editionColumns.some((column) => column.name === 'kind')) {
@@ -164,6 +172,18 @@ export function saveRenderJob(job: RenderJob): void {
 export function getRenderJob(id: string): RenderJob | undefined {
   const row = sqlite.prepare('SELECT payload_json FROM render_jobs WHERE id=?').get(id) as {payload_json: string} | undefined;
   return row ? renderJobSchema.parse(JSON.parse(row.payload_json)) : undefined;
+}
+
+export function getToolEnrichmentCache(cacheKey: string): ToolEnrichment | undefined {
+  const row = sqlite.prepare('SELECT payload_json FROM tool_enrichment_cache WHERE cache_key=?').get(cacheKey) as {payload_json: string} | undefined;
+  if (!row) return undefined;
+  try { return toolEnrichmentSchema.parse(JSON.parse(row.payload_json)); } catch { return undefined; }
+}
+
+export function saveToolEnrichmentCache(cacheKey: string, repo: string, payload: ToolEnrichment): void {
+  sqlite.prepare(`INSERT INTO tool_enrichment_cache (cache_key,repo,payload_json,created_at) VALUES (?,?,?,?)
+    ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,created_at=excluded.created_at`)
+    .run(cacheKey, repo, JSON.stringify(toolEnrichmentSchema.parse(payload)), now());
 }
 
 export function createRenderJob(editionId: string): RenderJob {

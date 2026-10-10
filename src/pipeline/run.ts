@@ -46,7 +46,7 @@ export async function buildCandidates(date: string, providedProfiles?: Repositor
   for (const [index, profile] of profiles.entries()) {
     const assessment = assessTool(profile);
     const enriched = enrichToolWithRules(profile);
-    const content = [profile.description, profile.readme.slice(0, 10_000)].filter(Boolean).join('\n\n');
+    const content = [`项目描述：${profile.description || '未提供'}`, `README：\n${profile.readme.slice(0, 20_000)}`].join('\n\n');
     const source = {
       id: stableSourceId(profile.url), sourceName: 'GitHub', title: profile.repo, url: profile.url,
       content: content || profile.repo, fetchedAt: profile.fetchedAt, primarySource: profile.primarySource,

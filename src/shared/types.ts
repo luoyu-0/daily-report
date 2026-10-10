@@ -41,7 +41,7 @@ export type ToolCandidate = z.infer<typeof toolCandidateSchema>;
 export const toolEnrichmentSchema = z.object({
   oneLinePitchZh: z.string().min(4).max(160), toolType: toolTypeSchema,
   useCases: z.array(z.string().min(2)).min(1).max(5), targetUsers: z.array(z.string().min(2)).min(1).max(5),
-  quickStart: z.string().max(600).optional(), prerequisites: z.array(z.string()).max(5), caveats: z.array(z.string()).max(5),
+  quickStart: z.string().max(600).optional(), prerequisites: z.array(z.string()).max(5).default([]), caveats: z.array(z.string()).max(5).default([]),
   sourceRefs: z.array(z.string().regex(/^E\d+$/)).min(1), confidence: z.number().min(0).max(1), riskFlags: z.array(z.string()).max(5),
 });
 export type ToolEnrichment = z.infer<typeof toolEnrichmentSchema>;

@@ -10,15 +10,14 @@ import {
   updateEditionStatus, upsertCandidate,
 } from './db.js';
 import {buildCandidates, mapWithConcurrency} from './pipeline/run.js';
-import {enrichToolWithLlm} from './pipeline/llm.js';
+import {buildToolEvidence, enrichToolWithLlm} from './pipeline/llm.js';
 import {toolCandidateSchema, type DiscoveryEdition} from './shared/types.js';
 import {REVIEW_API_VERSION, REVIEW_APP_ID} from './shared/review-contract.js';
 import {renderEdition} from './render.js';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const editSchema = toolCandidateSchema.pick({
-  oneLinePitchZh: true, toolType: true, useCases: true, targetUsers: true, quickStart: true,
-  prerequisites: true, caveats: true, selected: true, confirmed: true,
+  oneLinePitchZh: true, toolType: true, useCases: true, targetUsers: true, selected: true, confirmed: true,
 }).partial();
 
 const discoveryEdition = (id: string): DiscoveryEdition | undefined => {
@@ -88,7 +87,7 @@ export async function createApp(serveWeb = false) {
     if (!candidate) return reply.code(404).send({error: '候选工具不存在'});
     const enriched = await enrichToolWithLlm(candidate);
     upsertCandidate({...candidate, ...enriched.tool, generationMethod: enriched.method, confirmed: false});
-    logEvent(edition.id, 'enrichment', `重新提炼：${candidate.repo}`, {candidateId: candidate.id, method: enriched.method, warning: enriched.warning});
+    logEvent(edition.id, 'enrichment', `重新提炼：${candidate.repo}`, {candidateId: candidate.id, method: enriched.method, cacheHit: enriched.cacheHit, warning: enriched.warning});
     return discoveryEdition(edition.id);
   });
   app.post('/api/editions/:id/optimize-selected', async (request, reply) => {
@@ -98,18 +97,19 @@ export async function createApp(serveWeb = false) {
     const edition = sourceEdition.status === 'draft' ? sourceEdition : forkEdition(sourceEdition.id);
     const targets = edition.candidates.filter((item) => item.selected && item.generationMethod !== 'llm');
     if (targets.length > 5) return reply.code(400).send({error: '单次最多优化 5 个工具'});
-    if (!targets.length) return {edition, requested: 0, optimized: 0, fallback: 0, inputChars: 0, warnings: []};
+    if (!targets.length) return {edition, requested: 0, optimized: 0, fallback: 0, cacheHits: 0, inputChars: 0, warnings: []};
     const warnings: string[] = [];
-    let optimized = 0; let fallback = 0;
-    const inputChars = targets.reduce((total, candidate) => total + Math.min(candidate.sources[0].content.length, config.llm.evidenceMaxChars), 0);
+    let optimized = 0; let fallback = 0; let cacheHits = 0; let inputChars = 0;
     await mapWithConcurrency(targets, Math.min(2, config.llm.concurrency), async (candidate) => {
       const enriched = await enrichToolWithLlm(candidate);
+      if (enriched.cacheHit) cacheHits += 1;
+      else inputChars += buildToolEvidence(candidate, config.llm.evidenceMaxChars).length;
       if (enriched.method === 'llm') optimized += 1;
       else { fallback += 1; if (enriched.warning) warnings.push(`${candidate.repo}：${enriched.warning}`); }
       upsertCandidate({...candidate, ...enriched.tool, generationMethod: enriched.method, confirmed: false});
-      logEvent(edition.id, 'enrichment', `按需优化：${candidate.repo}`, {candidateId: candidate.id, method: enriched.method, warning: enriched.warning});
+      logEvent(edition.id, 'enrichment', `按需优化：${candidate.repo}`, {candidateId: candidate.id, method: enriched.method, cacheHit: enriched.cacheHit, warning: enriched.warning});
     });
-    return {edition: discoveryEdition(edition.id)!, requested: targets.length, optimized, fallback, inputChars, warnings};
+    return {edition: discoveryEdition(edition.id)!, requested: targets.length, optimized, fallback, cacheHits, inputChars, warnings};
   });
   app.post('/api/editions/:id/approve', async (request, reply) => {
     const edition = discoveryEdition((request.params as {id: string}).id);

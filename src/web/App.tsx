@@ -7,9 +7,14 @@ import {totalDurationFrames, VIDEO_FPS, VIDEO_HEIGHT, VIDEO_WIDTH} from '../vide
 import {api} from './api.js';
 import './tool-radar.css';
 
-type OptimizationResult = {edition: DiscoveryEdition; requested: number; optimized: number; fallback: number; inputChars: number; warnings: string[]};
+type OptimizationResult = {edition: DiscoveryEdition; requested: number; optimized: number; fallback: number; cacheHits: number; inputChars: number; warnings: string[]};
 const toolTypes: ToolType[] = ['CLI', '桌面应用', 'Web 工具', '开发工具', '自动化', 'Agent', '框架与库', '其他'];
 const lines = (value: string) => value.split('\n').map((item) => item.trim()).filter(Boolean);
+const sourceOverview = (tool: ToolCandidate) => {
+  const content = tool.sources[0]?.content ?? '';
+  const marked = content.match(/^项目描述：([^\n]+)/)?.[1]?.trim();
+  return (marked || content.split(/\n\s*\n/)[0] || '仓库未提供项目描述').slice(0, 600);
+};
 const parseEdition = (value: unknown): DiscoveryEdition => {
   const candidate = value as Partial<DiscoveryEdition> | null;
   const valid = candidate?.kind === 'github-tools' && typeof candidate.id === 'string' && Array.isArray(candidate.candidates)
@@ -42,15 +47,13 @@ function ToolEditor({tool, onUpdate, onRegenerate}: {
     setBusy(true);
     try { await onUpdate(tool.id, {
       oneLinePitchZh: draft.oneLinePitchZh, toolType: draft.toolType, useCases: draft.useCases,
-      targetUsers: draft.targetUsers, quickStart: draft.quickStart, prerequisites: draft.prerequisites,
-      caveats: draft.caveats, selected: draft.selected, confirmed,
+      targetUsers: draft.targetUsers, selected: draft.selected, confirmed,
     }); } finally { setBusy(false); }
   };
   return <article className={`editor-card ${tool.selected ? 'selected' : ''}`}>
     <div className="card-top"><strong>#{String(tool.rank).padStart(2, '0')}</strong><span className="score">实用性 {tool.utilityScore}</span><span className={`method ${tool.generationMethod}`}>{tool.generationMethod === 'llm' ? 'LLM + 证据' : '规则提炼'}</span><label className="pick"><input type="checkbox" checked={draft.selected} onChange={(event) => setDraft({...draft, selected: event.target.checked})}/>入选</label></div>
-    <div className="compare"><section className="source-pane"><div className="eyebrow">仓库证据</div><h3>{tool.repo}</h3><p>{tool.sources[0].content}</p><div className="repo-metrics"><span>{tool.language ?? '未知语言'}</span><span>{tool.license ?? '无许可证信息'}</span><span>{tool.totalStars?.toLocaleString() ?? '—'} Stars</span></div><a href={tool.url} target="_blank" rel="noreferrer">GitHub ↗</a>{tool.excludeReason && <div className="warning">非工具提示：{tool.excludeReason}</div>}</section>
-      <section className="edit-pane"><div className="edit-heading"><div className="eyebrow">推荐文案</div><select value={draft.toolType} onChange={(event) => setDraft({...draft, toolType: event.target.value as ToolType})}>{toolTypes.map((type) => <option key={type}>{type}</option>)}</select></div><input value={draft.oneLinePitchZh} onChange={(event) => setDraft({...draft, oneLinePitchZh: event.target.value})}/><label>使用场景（每行一项）</label><textarea value={draft.useCases.join('\n')} onChange={(event) => setDraft({...draft, useCases: lines(event.target.value)})}/><label>适合人群（每行一项）</label><textarea className="compact-textarea" value={draft.targetUsers.join('\n')} onChange={(event) => setDraft({...draft, targetUsers: lines(event.target.value)})}/><label>README 快速开始</label><textarea className="compact-textarea code-input" value={draft.quickStart ?? ''} onChange={(event) => setDraft({...draft, quickStart: event.target.value || undefined})}/><label>注意事项（每行一项）</label><textarea className="compact-textarea" value={draft.caveats.join('\n')} onChange={(event) => setDraft({...draft, caveats: lines(event.target.value)})}/></section></div>
-    {tool.riskFlags.length > 0 && <div className="warning">⚠ {tool.riskFlags.join(' · ')}</div>}
+    <div className="compare"><section className="source-pane"><div className="eyebrow">仓库证据</div><h3>{tool.repo}</h3><p>{sourceOverview(tool)}</p><div className="repo-metrics"><span>{tool.language ?? '未知语言'}</span><span>{tool.license ?? '无许可证信息'}</span><span>{tool.totalStars?.toLocaleString() ?? '—'} Stars</span></div><a href={tool.url} target="_blank" rel="noreferrer">GitHub ↗</a>{tool.excludeReason && <div className="warning">非工具提示：{tool.excludeReason}</div>}</section>
+      <section className="edit-pane"><div className="edit-heading"><div className="eyebrow">推荐文案</div><select value={draft.toolType} onChange={(event) => setDraft({...draft, toolType: event.target.value as ToolType})}>{toolTypes.map((type) => <option key={type}>{type}</option>)}</select></div><input value={draft.oneLinePitchZh} onChange={(event) => setDraft({...draft, oneLinePitchZh: event.target.value})}/><label>使用场景（每行一项）</label><textarea value={draft.useCases.join('\n')} onChange={(event) => setDraft({...draft, useCases: lines(event.target.value)})}/><label>适合人群（每行一项）</label><textarea className="compact-textarea" value={draft.targetUsers.join('\n')} onChange={(event) => setDraft({...draft, targetUsers: lines(event.target.value)})}/></section></div>
     <div className="card-actions"><span className={tool.confirmed ? 'confirmed' : 'pending'}>{tool.confirmed ? '✓ 已确认' : '待确认'}</span><button onClick={() => onRegenerate(tool.id)} disabled={busy}>LLM 优化此项</button><button onClick={() => save(false)} disabled={busy}>保存</button><button className="primary small" onClick={() => save(true)} disabled={busy}>保存并确认</button></div>
   </article>;
 }
@@ -88,7 +91,7 @@ export function App() {
   const optimize = async () => {
     if (!llmTargets.length || !window.confirm(`将调用 LLM 优化 ${llmTargets.length} 个入选工具，最多发送约 ${(estimatedChars / 1000).toFixed(1)}k 字符。是否继续？`)) return;
     setOptimizing(true); setError('');
-    try { const result = await api<OptimizationResult>(`/api/editions/${edition.id}/optimize-selected`, {method: 'POST'}); setEdition(parseEdition(result.edition)); setOptimizationMessage(`优化完成：成功 ${result.optimized}，规则回退 ${result.fallback}。`); if (result.warnings.length) setError(result.warnings.join('；')); }
+    try { const result = await api<OptimizationResult>(`/api/editions/${edition.id}/optimize-selected`, {method: 'POST'}); setEdition(parseEdition(result.edition)); setOptimizationMessage(`优化完成：成功 ${result.optimized}，缓存命中 ${result.cacheHits}，规则回退 ${result.fallback}，本次发送 ${result.inputChars} 个证据字符。`); if (result.warnings.length) setError(result.warnings.join('；')); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setOptimizing(false); }
   };
   const render = async () => { try { setJob(await api<RenderJob>(`/api/editions/${edition.id}/render`, {method: 'POST'})); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } };

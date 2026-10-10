@@ -18,6 +18,8 @@ try {
   if (radarCount !== cardCount) throw new Error(`热榜 ${radarCount} 条与候选 ${cardCount} 条不一致`);
   if (!previewText?.includes('完整成片预览')) throw new Error('未找到 Remotion 预览区域');
   if (!videoText?.includes('GitHub 工具雷达')) throw new Error('Remotion 预览组件未渲染品牌片头');
+  const pageText = await page.locator('body').textContent();
+  if (pageText?.includes('README 快速开始') || pageText?.includes('注意事项（每行一项）')) throw new Error('审核台仍显示安装命令或注意事项编辑区');
 
   const compatibilityPage = await browser.newPage({viewport: {width: 1200, height: 800}});
   await compatibilityPage.route('**/api/editions/latest', (route) => route.fulfill({

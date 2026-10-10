@@ -31,8 +31,6 @@ export function ToolCard({tool, brand, index, total, style}: {
           <div><small>License</small><strong style={{display: 'block', fontSize: 24}}>{tool.license ?? '未识别'}</strong></div>
           <div><small>适合</small><strong style={{display: 'block', fontSize: 21}}>{tool.targetUsers.slice(0, 2).join('、')}</strong></div>
         </div>
-        {tool.quickStart && <div style={{marginTop: 24, padding: 18, borderRadius: 14, background: '#0f172a', color: '#e2e8f0', fontFamily: 'Consolas, monospace', fontSize: 17, whiteSpace: 'pre-wrap', overflow: 'hidden', maxHeight: 150}}>{tool.quickStart}</div>}
-        {tool.caveats[0] && <p style={{margin: '22px 0 0', color: '#9a3412', fontSize: 18}}>注意：{tool.caveats[0]}</p>}
       </aside>
     </div>
     <footer style={{display: 'flex', justifyContent: 'space-between', gap: 28, color: '#64748b'}}><span>所有结论来自仓库公开资料</span><strong style={{overflowWrap: 'anywhere', textAlign: 'right'}}>{tool.url}</strong></footer>

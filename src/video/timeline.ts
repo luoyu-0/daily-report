@@ -25,7 +25,7 @@ export function buildTimeline(edition: DiscoveryEdition): TimelineSegment[] {
   if (selected.length) add({type: 'section', durationInFrames: 3 * VIDEO_FPS});
   selected.forEach((tool, toolIndex) => add({
     type: 'tool', toolIndex,
-    durationInFrames: toolDurationFrames(`${tool.oneLinePitchZh}${tool.useCases.join('')}${tool.caveats.join('')}`),
+    durationInFrames: toolDurationFrames(`${tool.oneLinePitchZh}${tool.useCases.join('')}`),
   }));
   add({type: 'summary', durationInFrames: 14 * VIDEO_FPS});
   return segments;

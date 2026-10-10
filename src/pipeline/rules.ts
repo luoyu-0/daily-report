@@ -108,16 +108,8 @@ export function classifyTool(profile: RepositoryProfile): ToolType {
   return '其他';
 }
 
-export function extractQuickStart(readme: string): string | undefined {
-  if (!readme) return undefined;
-  const section = readme.match(/(?:^|\n)#{1,3}\s*(?:quick\s*start|getting\s*started|installation|install|usage|快速开始|安装|使用)[^\n]*\n([\s\S]{0,2500})/i)?.[1] ?? readme.slice(0, 3_000);
-  const code = section.match(/```(?:bash|sh|shell|powershell|zsh|cmd)?\s*\n([\s\S]*?)```/i)?.[1]?.trim();
-  return code ? code.slice(0, 600) : undefined;
-}
-
 export function assessTool(profile: RepositoryProfile) {
   const corpus = `${profile.repo} ${profile.description} ${profile.topics.join(' ')} ${profile.readme.slice(0, 8_000)}`;
-  const quickStart = extractQuickStart(profile.readme);
   const excluded = nonToolPattern.test(corpus);
   const positive = toolPattern.test(corpus);
   const toolLikely = !profile.archived && !excluded && positive;
@@ -125,7 +117,6 @@ export function assessTool(profile: RepositoryProfile) {
   score += Math.max(0, 18 - (profile.rank - 1));
   score += Math.min(15, Math.round(Math.log10((profile.starsToday ?? 0) + 1) * 6));
   score += positive ? 18 : 4;
-  score += quickStart ? 14 : 0;
   score += profile.license ? 8 : 0;
   score += profile.readme.length > 1_000 ? 5 : 0;
   if (profile.archived) score -= 35;
@@ -137,9 +128,8 @@ export function assessTool(profile: RepositoryProfile) {
   const riskFlags = [
     ...(profile.metadataWarning ? [profile.metadataWarning] : []),
     ...(!profile.license ? ['未识别到开源许可证'] : []),
-    ...(!quickStart ? ['未提取到明确的快速开始命令'] : []),
     ...(profile.archived ? ['仓库已归档'] : []),
   ];
-  return {toolType: classifyTool(profile), toolLikely, utilityScore, excludeReason, quickStart, riskFlags};
+  return {toolType: classifyTool(profile), toolLikely, utilityScore, excludeReason, riskFlags};
 }
 
