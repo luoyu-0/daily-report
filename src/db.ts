@@ -135,6 +135,24 @@ export function getLatestEdition(): DiscoveryEdition | undefined {
   return edition.kind === 'github-tools' ? edition : undefined;
 }
 
+export function getToolHistory(date: string): {previousRepos: Set<string>; todayCandidates: Map<string, ToolCandidate>} {
+  const previousRows = sqlite.prepare(`SELECT DISTINCT LOWER(json_extract(c.payload_json, '$.repo')) AS repo
+    FROM candidates c JOIN editions e ON e.id = c.edition_id
+    WHERE e.kind = 'github-tools' AND e.date < ?`).all(date) as Array<{repo: string}>;
+  const todayRows = sqlite.prepare(`SELECT c.payload_json FROM candidates c JOIN editions e ON e.id = c.edition_id
+    WHERE e.kind = 'github-tools' AND e.date = ? ORDER BY e.version DESC`).all(date) as Array<{payload_json: string}>;
+  const todayCandidates = new Map<string, ToolCandidate>();
+  for (const row of todayRows) {
+    const candidate = toolCandidateSchema.parse(JSON.parse(row.payload_json));
+    const key = candidate.repo.toLowerCase();
+    const latest = todayCandidates.get(key);
+    if (!latest || (latest.generationMethod !== 'llm' && candidate.generationMethod === 'llm' && !latest.confirmed)) {
+      todayCandidates.set(key, candidate);
+    }
+  }
+  return {previousRepos: new Set(previousRows.map((row) => row.repo)), todayCandidates};
+}
+
 export function upsertCandidate(candidate: CandidateStory | ToolCandidate): void {
   const parsed = 'repo' in candidate ? toolCandidateSchema.parse(candidate) : legacyCandidateStorySchema.parse(candidate);
   sqlite.prepare(`INSERT INTO candidates (id,edition_id,payload_json) VALUES (?,?,?)

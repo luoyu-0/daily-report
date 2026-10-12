@@ -85,13 +85,13 @@ export async function collectGithubTrending(expectedDate = currentChinaDate()): 
     if (fetchedDate !== expectedDate) throw new Error(`官方页面只能提供 ${fetchedDate} 的实时榜单`);
     const entries = parseGithubTrendingHtml(await response.text(), fetchedAt);
     if (entries.length < 5) throw new Error(`官方页面仅解析到 ${entries.length} 条`);
-    return {entries: entries.slice(0, config.github.candidateLimit), warnings: []};
+    return {entries, warnings: []};
   } catch (error) { officialError = errorMessage(error); }
   try {
     const response = await fetchWithRetry(TRENDING_RSS_URL);
     const entries = parseGithubTrendingRss(await response.text(), new Date().toISOString(), expectedDate);
     if (entries.length < 5) throw new Error(`备用源仅返回 ${entries.length} 条`);
-    return {entries: entries.slice(0, config.github.candidateLimit), warnings: [`GitHub 官方 Trending 页面不可达，已使用同日期社区镜像：${officialError}`]};
+    return {entries, warnings: [`GitHub 官方 Trending 页面不可达，已使用同日期社区镜像：${officialError}`]};
   } catch (error) {
     throw new Error(`GitHub ${expectedDate} 全球 Today 榜不可用。官方页面：${officialError}；备用源：${errorMessage(error)}`);
   }

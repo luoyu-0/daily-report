@@ -7,15 +7,21 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const resolveFromRoot = (value: string | undefined, fallback: string) =>
   path.resolve(rootDir, value || fallback);
+const dataRoot = path.join(rootDir, 'data');
+const dataDir = resolveFromRoot(process.env.DATA_DIR, 'data');
+const dataRelative = path.relative(dataRoot, dataDir);
+if (dataRelative === '..' || dataRelative.startsWith(`..${path.sep}`) || path.isAbsolute(dataRelative)) {
+  throw new Error('DATA_DIR 必须位于项目的 data/ 目录内');
+}
 
 export const config = {
   rootDir,
   appPort: Number(process.env.APP_PORT ?? 4173),
   reviewPort: Number(process.env.REVIEW_PORT ?? 5173),
-  dataDir: resolveFromRoot(process.env.DATA_DIR, 'data'),
+  dataDir,
   outputDir: resolveFromRoot(process.env.OUTPUT_DIR, 'output'),
   publicDir: path.join(rootDir, 'public'),
-  databasePath: path.join(resolveFromRoot(process.env.DATA_DIR, 'data'), 'daily-report.db'),
+  databasePath: path.join(dataDir, 'daily-report.db'),
   llm: {
     baseUrl: (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, ''),
     apiKey: process.env.LLM_API_KEY || '',

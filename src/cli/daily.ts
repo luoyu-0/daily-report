@@ -13,7 +13,7 @@ console.log(`正在读取 ${date} 的全球 GitHub Trending Today…`);
 let previousPhase = '';
 const showProgress = ({phase, completed, total}: DailyProgress) => {
   const label = phase === 'trending' ? '获取今日榜单' : phase === 'profiles' ? '获取仓库详情' : '整理候选';
-  const filled = Math.round(completed / total * 20);
+  const filled = total === 0 ? 20 : Math.round(completed / total * 20);
   const line = `${label} [${'█'.repeat(filled)}${'░'.repeat(20 - filled)}] ${completed}/${total}`;
   if (process.stdout.isTTY) {
     process.stdout.write(`\r\x1b[2K${line}`);
@@ -26,8 +26,8 @@ const showProgress = ({phase, completed, total}: DailyProgress) => {
 let collectionError = '';
 try {
   const result = await buildCandidates(date, undefined, showProgress);
-  console.log(`已创建 ${result.edition.id}，工具候选 ${result.edition.candidates.length} 条。`);
-  console.log('本次仅执行规则识别，尚未调用 LLM；可在审核台选定 3～5 个工具后按需优化。');
+  console.log(`已创建 ${result.edition.id}，今日新仓库候选 ${result.edition.candidates.length} 条；历史跳过 ${result.skippedHistorical} 条，同日复用 ${result.reusedToday} 条。`);
+  console.log('本次未调用 LLM；已保留同日缓存中的审核及 LLM 文案，可在审核台按需优化。');
   if (result.warnings.length) console.warn(`警告：\n- ${result.warnings.join('\n- ')}`);
   if (process.argv.includes('--no-review')) {
     console.log('采集完成；已按 --no-review 跳过审核台启动。');

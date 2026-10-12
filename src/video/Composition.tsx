@@ -28,7 +28,7 @@ function Radar({edition}: {edition: DiscoveryEdition}) {
   const top = [...edition.candidates].sort((a, b) => a.rank - b.rank);
   return <Fade><AbsoluteFill style={{...base, background: edition.brand.background, padding: 78, color: edition.brand.ink}}>
     <header style={{display: 'flex', justifyContent: 'space-between', alignItems: 'end', borderBottom: `3px solid ${edition.brand.primary}`, paddingBottom: 22}}>
-      <div><div style={{color: edition.brand.primary, fontWeight: 900, letterSpacing: 3}}>GITHUB · TODAY</div><h1 style={{fontSize: 62, margin: '10px 0 0'}}>全球热榜雷达</h1></div><b style={{fontSize: 24}}>{edition.date}</b>
+      <div><div style={{color: edition.brand.primary, fontWeight: 900, letterSpacing: 3}}>GITHUB · TODAY</div><h1 style={{fontSize: 62, margin: '10px 0 0'}}>今日新仓库雷达</h1></div><b style={{fontSize: 24}}>{edition.date}</b>
     </header>
     <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 24}}>{top.map((tool) => <div key={tool.id} style={{display: 'grid', gridTemplateColumns: '48px 1fr auto', gap: 12, alignItems: 'center', padding: '11px 17px', background: '#fff', border: `1px solid ${edition.brand.paleBlue}`, borderRadius: 13}}><b style={{fontSize: 21, color: edition.brand.primary}}>#{tool.rank}</b><div><strong style={{fontSize: 19}}>{tool.repo}</strong><div style={{fontSize: 14, color: '#64748b', marginTop: 3}}>{tool.language ?? '未标注语言'}</div></div><span style={{fontWeight: 800, color: '#0369a1'}}>+{tool.starsToday ?? '—'} ★</span></div>)}</div>
   </AbsoluteFill></Fade>;
