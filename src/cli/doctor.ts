@@ -23,6 +23,9 @@ if (proxyValue) {
   try {
     const proxyUrl = new URL(proxyValue);
     proxyDetail = `${proxyEnabled ? '已启用' : '已配置但未启用'} ${proxyUrl.hostname}:${proxyUrl.port}`;
+    if ((process.env.NO_PROXY || process.env.no_proxy || '').split(',').some((host) => ['github.com', '.github.com'].includes(host.trim()))) {
+      proxyDetail += '；GitHub 域名直连';
+    }
     proxyOk = proxyEnabled;
   } catch {
     proxyDetail = '代理地址格式无效';

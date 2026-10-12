@@ -131,27 +131,32 @@ async function fetchRepositoryProfile(entry: TrendingRepository): Promise<Reposi
       homepage, archived: Boolean(metadata.archived), repoUpdatedAt: metadata.updated_at || undefined, readme,
     };
   } catch (error) {
-    return {...entry, topics: [], archived: false, readme: '', metadataWarning: `仓库详情获取失败：${errorMessage(error)}`};
+    const detail = errorMessage(error);
+    const hint = detail.includes('HTTP 403') ? '（可能达到 GitHub API 匿名限额，可配置 GITHUB_TOKEN）' : '';
+    return {...entry, topics: [], archived: false, readme: '', metadataWarning: `仓库详情获取失败：${detail}${hint}`};
   }
 }
 
-export async function collectRepositoryProfiles(entries: TrendingRepository[]): Promise<{profiles: RepositoryProfile[]; warnings: string[]}> {
+export async function collectRepositoryProfiles(entries: TrendingRepository[], onProgress?: (completed: number, total: number) => void): Promise<{profiles: RepositoryProfile[]; warnings: string[]}> {
   const cache = readCache();
   const ttlMs = config.github.cacheHours * 3_600_000;
   const profiles = new Array<RepositoryProfile>(entries.length);
   let next = 0;
+  let completed = 0;
   const workers = Array.from({length: Math.min(3, entries.length)}, async () => {
     while (next < entries.length) {
       const index = next++;
       const entry = entries[index];
       const cached = cache[entry.repo.toLowerCase()];
-      if (cached && Date.now() - Date.parse(cached.fetchedAt) < ttlMs) {
+      if (cached && !cached.profile.metadataWarning && Date.now() - Date.parse(cached.fetchedAt) < ttlMs) {
         profiles[index] = {...cached.profile, ...entry, rank: entry.rank};
+        onProgress?.(++completed, entries.length);
         continue;
       }
       const profile = await fetchRepositoryProfile(entry);
       profiles[index] = profile;
-      cache[entry.repo.toLowerCase()] = {fetchedAt: new Date().toISOString(), profile};
+      if (!profile.metadataWarning) cache[entry.repo.toLowerCase()] = {fetchedAt: new Date().toISOString(), profile};
+      onProgress?.(++completed, entries.length);
     }
   });
   await Promise.all(workers);

@@ -5,7 +5,7 @@ import {enrichToolWithRules} from './llm.js';
 import {assessTool, stableSourceId} from './rules.js';
 
 export type DailyRunResult = {edition: DiscoveryEdition; warnings: string[]};
-export type DailyProgress = {completed: number; total: number; repo?: string; method?: 'llm' | 'rule'};
+export type DailyProgress = {phase: 'trending' | 'profiles' | 'rules'; completed: number; total: number; repo?: string; method?: 'llm' | 'rule'};
 
 export async function mapWithConcurrency<T>(items: T[], concurrency: number, worker: (item: T, index: number) => Promise<void>): Promise<void> {
   let nextIndex = 0;
@@ -31,8 +31,11 @@ export async function buildCandidates(date: string, providedProfiles?: Repositor
   let warnings: string[] = [];
   let profiles = providedProfiles;
   if (!profiles) {
+    onProgress?.({phase: 'trending', completed: 0, total: 1});
     const trending = await collectGithubTrending(date);
-    const detailed = await collectRepositoryProfiles(trending.entries);
+    onProgress?.({phase: 'trending', completed: 1, total: 1});
+    onProgress?.({phase: 'profiles', completed: 0, total: trending.entries.length});
+    const detailed = await collectRepositoryProfiles(trending.entries, (completed, total) => onProgress?.({phase: 'profiles', completed, total}));
     profiles = detailed.profiles;
     warnings = [...trending.warnings, ...detailed.warnings];
   }
@@ -41,7 +44,7 @@ export async function buildCandidates(date: string, providedProfiles?: Repositor
   const edition = createEdition(date);
   const suggested = chooseSuggestedTools(profiles);
   logEvent(edition.id, 'collection', `采集全球 GitHub Today 榜 ${profiles.length} 条，建议精选 ${suggested.size} 个工具`, {warnings});
-  onProgress?.({completed: 0, total: profiles.length});
+  onProgress?.({phase: 'rules', completed: 0, total: profiles.length});
 
   for (const [index, profile] of profiles.entries()) {
     const assessment = assessTool(profile);
@@ -66,7 +69,7 @@ export async function buildCandidates(date: string, providedProfiles?: Repositor
     };
     upsertCandidate(candidate);
     logEvent(edition.id, 'enrichment', `${profile.repo} 完成规则识别`, {candidateId: candidate.id, toolLikely: candidate.toolLikely, utilityScore: candidate.utilityScore});
-    onProgress?.({completed: index + 1, total: profiles.length, repo: profile.repo, method: 'rule'});
+    onProgress?.({phase: 'rules', completed: index + 1, total: profiles.length, repo: profile.repo, method: 'rule'});
   }
   return {edition: getEdition(edition.id)! as DiscoveryEdition, warnings};
 }
