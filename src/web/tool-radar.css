@@ -32,3 +32,5 @@
 .edit-pane .code-input { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
 .global-error.success { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
 .startup-error { max-width: 800px; color: #be123c !important; word-break: break-word; }
+.optimization-progress { display: flex; align-items: center; gap: 12px; margin-top: 14px; color: #1d4ed8; font-size: 12px; font-weight: 750; }
+.optimization-progress progress { flex: 1; height: 8px; accent-color: #2563eb; }
