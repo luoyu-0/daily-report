@@ -16,9 +16,16 @@
 
 1. 复制 `.env.example` 为 `.env.local`。LLM 和 GitHub Token 都是可选配置。
 
-   - `GITHUB_TOKEN`：提高 GitHub REST API 限额；不填时使用匿名限额和本地缓存。
+   - `GITHUB_TOKEN`：使用自己的 GitHub 个人访问令牌（PAT）访问公开仓库 API，避免共享 IP 的匿名速率限额；不填时使用匿名限额和本地缓存。
    - `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`：仅用于人工触发的中文提炼。
    - `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`：只作用于本项目的 Node.js 命令，无需在终端手动启用代理。
+
+### GitHub 账户配置与隐私
+
+1. 在 GitHub 的[个人访问令牌设置页](https://github.com/settings/personal-access-tokens/new)创建 **fine-grained personal access token**，设置到期时间，仓库权限仅授予公开仓库读取所需的最小范围；读取 README 所需权限为 **Contents: Read-only**。不要授予写入权限，也不要在项目中填写 GitHub 密码。
+2. 在本机的 `.env.local` 填入 `GITHUB_TOKEN=你的令牌`，不要把令牌粘贴到聊天、截图或提交记录里。运行 `npm run doctor`，看到“GitHub API 身份验证：令牌已生效”及剩余额度后，再运行 `npm run daily`。修改令牌后，已运行的审核服务需重启才会读取新配置。
+
+令牌只由本地 Node.js 进程读取，并通过 HTTPS 作为请求头发送给 **GitHub 官方 `api.github.com`**，用于仓库元数据与 README 请求；不会作为日报内容、LLM 提示词、浏览器响应或日志保存/发送。`.env.local` 已被 Git 忽略。这里的“不会上传隐私信息”不包括认证所必需的令牌发送给 GitHub 本身；设备上的其他程序、备份或误分享文件仍可能造成泄露，请妥善保管并定期轮换令牌。[GitHub 速率限制说明](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)、[令牌权限说明](https://docs.github.com/en/rest/repos/contents)。
 
 2. 检查运行环境：
 

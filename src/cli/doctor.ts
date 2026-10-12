@@ -48,7 +48,25 @@ try {
 } catch {
   checks.push({name: '可用磁盘', ok: false, detail: `无法读取 ${path.relative(config.rootDir, config.outputDir)}`});
 }
-checks.push({name: 'GitHub API', ok: true, detail: config.github.token ? '已配置 Token，可提高限额' : '未配置 Token，使用匿名限额与本地缓存'});
+if (config.github.token) {
+  try {
+    const response = await fetch('https://api.github.com/rate_limit', {
+      headers: {authorization: `Bearer ${config.github.token}`, accept: 'application/vnd.github+json', 'user-agent': 'GitHub-Tool-Radar/1.0'},
+      redirect: 'error', signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      checks.push({name: 'GitHub API 身份验证', ok: false, detail: `HTTP ${response.status}；请检查 GITHUB_TOKEN 是否有效`});
+    } else {
+      const data = await response.json() as {resources?: {core?: {limit?: number; remaining?: number}}};
+      const {limit, remaining} = data.resources?.core ?? {};
+      checks.push({name: 'GitHub API 身份验证', ok: typeof limit === 'number' && limit > 60, detail: `令牌${typeof limit === 'number' && limit > 60 ? '已生效' : '未生效'}；当前额度剩余 ${remaining ?? '未知'} / ${limit ?? '未知'}`});
+    }
+  } catch {
+    checks.push({name: 'GitHub API 身份验证', ok: false, detail: '验证请求失败；请检查网络或代理设置（不会显示令牌）'});
+  }
+} else {
+  checks.push({name: 'GitHub API 身份验证', ok: true, detail: '未配置 GITHUB_TOKEN，使用匿名限额与本地缓存'});
+}
 checks.push({name: 'LLM', ok: Boolean(config.llm.apiKey && config.llm.model), detail: config.llm.apiKey && config.llm.model ? `已配置 ${config.llm.model}` : '未配置，仅使用规则提炼'});
 for (const item of checks) console.log(`${item.ok ? '✓' : item.name === 'LLM' ? '!' : '✗'} ${item.name}: ${item.detail}`);
 if (checks.some((item) => !item.ok && item.name !== 'LLM')) process.exitCode = 1;

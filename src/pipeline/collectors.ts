@@ -132,7 +132,9 @@ async function fetchRepositoryProfile(entry: TrendingRepository): Promise<Reposi
     };
   } catch (error) {
     const detail = errorMessage(error);
-    const hint = detail.includes('HTTP 403') ? '（可能达到 GitHub API 匿名限额，可配置 GITHUB_TOKEN）' : '';
+    const hint = detail.includes('HTTP 403')
+      ? config.github.token ? '（账户限额可能耗尽或令牌权限不足，请运行 npm run doctor）' : '（可能达到 GitHub API 匿名限额，可配置 GITHUB_TOKEN）'
+      : '';
     return {...entry, topics: [], archived: false, readme: '', metadataWarning: `仓库详情获取失败：${detail}${hint}`};
   }
 }
