@@ -144,7 +144,7 @@ export function getLatestEdition(): DiscoveryEdition | undefined {
 export function getToolHistory(date: string): {previousRepos: Set<string>; todayCandidates: Map<string, ToolCandidate>} {
   const previousRows = sqlite.prepare(`SELECT DISTINCT LOWER(json_extract(c.payload_json, '$.repo')) AS repo
     FROM candidates c JOIN editions e ON e.id = c.edition_id
-    WHERE e.kind = 'github-tools' AND e.date < ? AND e.status = 'rendered'
+    WHERE e.kind = 'github-tools' AND e.date <= ? AND e.status = 'rendered'
       AND json_extract(c.payload_json, '$.selected') = 1
       AND NOT EXISTS (SELECT 1 FROM repo_lock_resets r WHERE r.date = e.date AND r.repo = LOWER(json_extract(c.payload_json, '$.repo')))`)
     .all(date) as Array<{repo: string}>;

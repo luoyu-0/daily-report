@@ -40,7 +40,7 @@ function EmptyState({onCreated}: {onCreated: (edition: DiscoveryEdition) => void
 }
 
 function TrendingRadar({tools}: {tools: ToolCandidate[]}) {
-  return <section className="github-panel"><div className="section-title"><div><div className="eyebrow">GITHUB · TRENDING · TODAY</div><h2>今日可选仓库</h2></div><span className="auto-badge">已跳过往期成片入选</span></div><div className="github-grid">{tools.length === 0 && <p>今日榜单暂无可选仓库。</p>}{[...tools].sort((a, b) => a.rank - b.rank).map((tool) => <article key={tool.id}><strong>#{tool.rank}</strong><div><h3>{tool.repo} {tool.rankingSource && <small className="ranking-source">{tool.rankingSource}</small>}</h3><p>{tool.oneLinePitchZh}</p><a href={tool.url} target="_blank" rel="noreferrer">查看仓库 ↗</a></div><span className="topic-tag">+{tool.starsToday ?? '—'} ★</span></article>)}</div></section>;
+  return <section className="github-panel"><div className="section-title"><div><div className="eyebrow">GITHUB · TRENDING · TODAY</div><h2>今日可选仓库</h2></div><span className="auto-badge">已跳过成片锁定仓库</span></div><div className="github-grid">{tools.length === 0 && <p>今日榜单暂无可选仓库。</p>}{[...tools].sort((a, b) => a.rank - b.rank).map((tool) => <article key={tool.id}><strong>#{tool.rank}</strong><div><h3>{tool.repo} {tool.rankingSource && <small className="ranking-source">{tool.rankingSource}</small>}</h3><p>{tool.oneLinePitchZh}</p><a href={tool.url} target="_blank" rel="noreferrer">查看仓库 ↗</a></div><span className="topic-tag">+{tool.starsToday ?? '—'} ★</span></article>)}</div></section>;
 }
 
 function ToolEditor({tool, onUpdate, onRegenerate, optimizing, optimizationLocked}: {

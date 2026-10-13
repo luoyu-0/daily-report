@@ -13,6 +13,7 @@ let createEdition: typeof import('../src/db.js').createEdition;
 let updateEditionStatus: typeof import('../src/db.js').updateEditionStatus;
 let getTodayLockedRepos: typeof import('../src/db.js').getTodayLockedRepos;
 let getToolHistory: typeof import('../src/db.js').getToolHistory;
+let deleteRepoLock: typeof import('../src/db.js').deleteRepoLock;
 let resetTodayRepoLock: typeof import('../src/db.js').resetTodayRepoLock;
 let sqlite: typeof import('../src/db.js').sqlite;
 
@@ -28,7 +29,7 @@ beforeAll(async () => {
   process.env.DATA_DIR = dataDir;
   vi.resetModules();
   ({buildCandidates} = await import('../src/pipeline/run.js'));
-  ({upsertCandidate, createEdition, updateEditionStatus, getTodayLockedRepos, getToolHistory, resetTodayRepoLock, sqlite} = await import('../src/db.js'));
+  ({upsertCandidate, createEdition, updateEditionStatus, getTodayLockedRepos, getToolHistory, deleteRepoLock, resetTodayRepoLock, sqlite} = await import('../src/db.js'));
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -43,6 +44,28 @@ afterAll(() => {
 });
 
 describe('本地日报复用', () => {
+  it('同一天重新采集时跳过已成片锁定的仓库并补足候选', async () => {
+    const date = '2026-10-19';
+    const first = await buildCandidates(date, [120, 121, 122].map((number) => profile(number)));
+    const lockedRepo = 'owner/tool-120';
+    for (const candidate of first.edition.candidates) {
+      upsertCandidate({...candidate, selected: candidate.repo === lockedRepo, confirmed: true});
+    }
+    updateEditionStatus(first.edition.id, 'rendered');
+
+    const entries = Array.from({length: 16}, (_, index) => profile(index + 120, index + 1));
+    const second = await buildCandidates(date, entries);
+    expect(getTodayLockedRepos(date)).toContain(lockedRepo);
+    expect(second.skippedHistorical).toBe(1);
+    expect(second.edition.candidates).toHaveLength(15);
+    expect(second.edition.candidates.map((item) => item.repo)).not.toContain(lockedRepo);
+    expect(second.edition.candidates[0].repo).toBe('owner/tool-121');
+
+    expect(deleteRepoLock(date, lockedRepo)).toBe(true);
+    const third = await buildCandidates(date, entries);
+    expect(third.edition.candidates[0].repo).toBe(lockedRepo);
+  });
+
   it('仅成功渲染且入选的历史仓库被跳过；同日重跑保留已优化文案和证据', async () => {
     const historical = await buildCandidates('2026-10-10', [1, 2, 3, 4, 5].map((number) => profile(number)));
     const locked = historical.edition.candidates.find((item) => item.repo === 'owner/tool-1')!;

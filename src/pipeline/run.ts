@@ -43,13 +43,13 @@ export async function buildCandidates(date: string, providedProfiles?: Repositor
     ? {profiles: freshEntries as RepositoryProfile[], warnings: [] as string[]}
     : await collectRepositoryProfiles(freshEntries, (completed, total) => onProgress?.({phase: 'profiles', completed, total}));
   warnings.push(...detailed.warnings);
-  if (limited.length < config.github.candidateLimit) warnings.push(`Today 榜仅找到 ${limited.length} 个未被往期成片锁定的仓库，未达到目标 ${config.github.candidateLimit} 个`);
+  if (limited.length < config.github.candidateLimit) warnings.push(`Today 榜仅找到 ${limited.length} 个未被成片锁定的仓库，未达到目标 ${config.github.candidateLimit} 个`);
   if (limited.length === 0) warnings.push('今日没有可入选的仓库，无法渲染成片');
   const profiles = new Map(detailed.profiles.map((profile) => [profile.repo.toLowerCase(), profile]));
   const reusedToday = limited.length - freshEntries.length;
 
   const edition = createEdition(date);
-  logEvent(edition.id, 'collection', `今日可选仓库 ${limited.length} 条，往期成片锁定跳过 ${skippedHistorical} 条，同日复用 ${reusedToday} 条`, {warnings});
+  logEvent(edition.id, 'collection', `今日可选仓库 ${limited.length} 条，成片锁定跳过 ${skippedHistorical} 条，同日复用 ${reusedToday} 条`, {warnings});
   onProgress?.({phase: 'rules', completed: 0, total: limited.length});
 
   for (const [index, entry] of limited.entries()) {
