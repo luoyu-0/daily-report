@@ -34,3 +34,12 @@
 .startup-error { max-width: 800px; color: #be123c !important; word-break: break-word; }
 .optimization-progress { display: flex; align-items: center; gap: 12px; margin-top: 14px; color: #1d4ed8; font-size: 12px; font-weight: 750; }
 .optimization-progress progress { flex: 1; height: 8px; accent-color: #2563eb; }
+.ranking-source { padding: 4px 8px; border-radius: 99px; background: #e0f2fe; color: #0369a1; font-size: 12px; font-weight: 800; }
+.locked-repos { margin: 10px 20px 16px; padding: 18px 20px; background: #fff; border: 1px solid #dbeafe; border-radius: 16px; }
+.locked-repos h2 { margin: 0 0 10px; font-size: 18px; }
+.locked-repos p { margin: 0; color: #64748b; font-size: 13px; }
+.locked-repo-list { display: grid; gap: 7px; max-height: 260px; overflow-y: auto; }
+.locked-repo-list > div { display: flex; align-items: center; gap: 14px; padding: 7px 9px; background: #f8fbff; border-radius: 8px; }
+.locked-repo-list time { color: #64748b; font-size: 12px; min-width: 82px; }
+.locked-repo-list a { color: #1d4ed8; text-decoration: none; font-size: 13px; font-weight: 750; }
+.locked-repo-list button { margin-left: auto; padding: 5px 8px; font-size: 11px; }

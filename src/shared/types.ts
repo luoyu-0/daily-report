@@ -25,9 +25,10 @@ export type ToolType = z.infer<typeof toolTypeSchema>;
 
 export const toolCandidateSchema = z.object({
   id: z.string(), editionId: z.string(), repo: z.string(), url: z.string().url(),
-  rank: z.number().int().positive(), starsToday: z.number().int().nonnegative().optional(),
+  rank: z.number().int().positive(), rankingSource: z.string().optional(), starsToday: z.number().int().nonnegative().optional(),
   totalStars: z.number().int().nonnegative().optional(), forks: z.number().int().nonnegative().optional(),
-  language: z.string().optional(), topics: z.array(z.string()), license: z.string().optional(), homepage: z.string().url().optional(),
+  language: z.string().optional(), languages: z.array(z.object({name: z.string(), bytes: z.number().nonnegative()})).optional(),
+  topics: z.array(z.string()), license: z.string().optional(), homepage: z.string().url().optional(),
   latestRelease: z.string().optional(), archived: z.boolean().default(false), repoUpdatedAt: z.string().datetime().optional(),
   toolType: toolTypeSchema, oneLinePitchZh: z.string().min(1).max(160), useCases: z.array(z.string()).max(5),
   targetUsers: z.array(z.string()).max(5), quickStart: z.string().max(600).optional(), prerequisites: z.array(z.string()).max(5),

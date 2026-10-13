@@ -59,6 +59,12 @@ sqlite.exec(`
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS repo_lock_resets (
+    date TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    reset_at TEXT NOT NULL,
+    PRIMARY KEY (date, repo)
+  );
 `);
 const editionColumns = sqlite.prepare('PRAGMA table_info(editions)').all() as Array<{name: string}>;
 if (!editionColumns.some((column) => column.name === 'kind')) {
@@ -138,7 +144,10 @@ export function getLatestEdition(): DiscoveryEdition | undefined {
 export function getToolHistory(date: string): {previousRepos: Set<string>; todayCandidates: Map<string, ToolCandidate>} {
   const previousRows = sqlite.prepare(`SELECT DISTINCT LOWER(json_extract(c.payload_json, '$.repo')) AS repo
     FROM candidates c JOIN editions e ON e.id = c.edition_id
-    WHERE e.kind = 'github-tools' AND e.date < ?`).all(date) as Array<{repo: string}>;
+    WHERE e.kind = 'github-tools' AND e.date < ? AND e.status = 'rendered'
+      AND json_extract(c.payload_json, '$.selected') = 1
+      AND NOT EXISTS (SELECT 1 FROM repo_lock_resets r WHERE r.date = e.date AND r.repo = LOWER(json_extract(c.payload_json, '$.repo')))`)
+    .all(date) as Array<{repo: string}>;
   const todayRows = sqlite.prepare(`SELECT c.payload_json FROM candidates c JOIN editions e ON e.id = c.edition_id
     WHERE e.kind = 'github-tools' AND e.date = ? ORDER BY e.version DESC`).all(date) as Array<{payload_json: string}>;
   const todayCandidates = new Map<string, ToolCandidate>();
@@ -151,6 +160,34 @@ export function getToolHistory(date: string): {previousRepos: Set<string>; today
     }
   }
   return {previousRepos: new Set(previousRows.map((row) => row.repo)), todayCandidates};
+}
+
+export function getLockedRepos(): Array<{date: string; repo: string}> {
+  return sqlite.prepare(`SELECT e.date AS date, MIN(json_extract(c.payload_json, '$.repo')) AS repo
+    FROM candidates c JOIN editions e ON e.id = c.edition_id
+    WHERE e.kind = 'github-tools' AND e.status = 'rendered'
+      AND json_extract(c.payload_json, '$.selected') = 1
+      AND NOT EXISTS (SELECT 1 FROM repo_lock_resets r WHERE r.date = e.date AND r.repo = LOWER(json_extract(c.payload_json, '$.repo')))
+    GROUP BY e.date, LOWER(json_extract(c.payload_json, '$.repo'))
+    ORDER BY e.date DESC, repo`).all() as Array<{date: string; repo: string}>;
+}
+
+export function getTodayLockedRepos(date: string): string[] {
+  return getLockedRepos().filter((item) => item.date === date).map((item) => item.repo);
+}
+
+export function resetTodayRepoLock(date: string, repo: string): boolean {
+  if (!getTodayLockedRepos(date).some((item) => item.toLowerCase() === repo.toLowerCase())) return false;
+  sqlite.prepare('INSERT OR REPLACE INTO repo_lock_resets (date,repo,reset_at) VALUES (?,?,?)')
+    .run(date, repo.toLowerCase(), now());
+  return true;
+}
+
+export function relockRenderedRepos(edition: DiscoveryEdition): void {
+  const clear = sqlite.prepare('DELETE FROM repo_lock_resets WHERE date=? AND repo=?');
+  sqlite.transaction(() => {
+    for (const candidate of edition.candidates.filter((item) => item.selected)) clear.run(edition.date, candidate.repo.toLowerCase());
+  })();
 }
 
 export function upsertCandidate(candidate: CandidateStory | ToolCandidate): void {

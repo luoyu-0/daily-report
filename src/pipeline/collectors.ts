@@ -7,15 +7,17 @@ import {stripHtml} from './rules.js';
 
 export type TrendingRepository = {
   repo: string; url: string; rank: number; description: string; language?: string;
-  starsToday?: number; fetchedAt: string; primarySource: boolean;
+  starsToday?: number; fetchedAt: string; primarySource: boolean; rankingSource?: string;
 };
 
 export type RepositoryProfile = TrendingRepository & {
   totalStars?: number; forks?: number; topics: string[]; license?: string; homepage?: string;
   archived: boolean; repoUpdatedAt?: string; readme: string; metadataWarning?: string;
+  languages?: Array<{name: string; bytes: number}>;
 };
 
 export const GITHUB_TRENDING_URL = 'https://github.com/trending?since=daily';
+const supplementalLanguages = ['typescript', 'python', 'javascript', 'go', 'java', 'rust', 'ruby', 'php'];
 const TRENDING_RSS_URL = 'https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml';
 const parser = new XMLParser({ignoreAttributes: false, attributeNamePrefix: '@_'});
 
@@ -56,7 +58,7 @@ export function parseGithubTrendingHtml(html: string, fetchedAt = new Date().toI
     const description = stripHtml(article.match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1] ?? '');
     const language = stripHtml(article.match(/itemprop="programmingLanguage"[^>]*>([\s\S]*?)<\/span>/i)?.[1] ?? '') || undefined;
     const starsToday = number(stripHtml(article.match(/([\d,]+)\s+stars?\s+today/i)?.[1] ?? ''));
-    return [{repo, url: `https://github.com/${repo}`, rank: index + 1, description, language, starsToday, fetchedAt, primarySource: true}];
+    return [{repo, url: `https://github.com/${repo}`, rank: index + 1, description, language, starsToday, fetchedAt, primarySource: true, rankingSource: '全球 Today'}];
   });
 }
 
@@ -72,29 +74,59 @@ export function parseGithubTrendingRss(xml: string, fetchedAt = new Date().toISO
     const repo = stripHtml(String(item.title ?? '')).replace(/\s/g, '');
     const url = String(item.link ?? '');
     if (!repo.includes('/') || !url.startsWith('https://github.com/')) return [];
-    return [{repo, url, rank: index + 1, description: stripHtml(String(item.description ?? '')), fetchedAt, primarySource: false}];
+    return [{repo, url, rank: index + 1, description: stripHtml(String(item.description ?? '')), fetchedAt, primarySource: false, rankingSource: '全球 Today'}];
   });
 }
 
-export async function collectGithubTrending(expectedDate = currentChinaDate()): Promise<{entries: TrendingRepository[]; warnings: string[]}> {
+export async function collectGithubTrending(expectedDate = currentChinaDate(), excludedRepos: ReadonlySet<string> = new Set(), targetCount = config.github.candidateLimit): Promise<{entries: TrendingRepository[]; warnings: string[]; skippedLocked: number}> {
   let officialError = '';
+  let globalEntries: TrendingRepository[] | undefined;
+  const warnings: string[] = [];
   try {
     const response = await fetchWithRetry(GITHUB_TRENDING_URL);
     const fetchedAt = new Date().toISOString();
     const fetchedDate = currentChinaDate(new Date(fetchedAt));
     if (fetchedDate !== expectedDate) throw new Error(`官方页面只能提供 ${fetchedDate} 的实时榜单`);
-    const entries = parseGithubTrendingHtml(await response.text(), fetchedAt);
-    if (entries.length < 5) throw new Error(`官方页面仅解析到 ${entries.length} 条`);
-    return {entries, warnings: []};
+    globalEntries = parseGithubTrendingHtml(await response.text(), fetchedAt);
+    if (globalEntries.length < 5) throw new Error(`官方页面仅解析到 ${globalEntries.length} 条`);
   } catch (error) { officialError = errorMessage(error); }
-  try {
-    const response = await fetchWithRetry(TRENDING_RSS_URL);
-    const entries = parseGithubTrendingRss(await response.text(), new Date().toISOString(), expectedDate);
-    if (entries.length < 5) throw new Error(`备用源仅返回 ${entries.length} 条`);
-    return {entries, warnings: [`GitHub 官方 Trending 页面不可达，已使用同日期社区镜像：${officialError}`]};
-  } catch (error) {
-    throw new Error(`GitHub ${expectedDate} 全球 Today 榜不可用。官方页面：${officialError}；备用源：${errorMessage(error)}`);
+  if (!globalEntries) {
+    try {
+      const response = await fetchWithRetry(TRENDING_RSS_URL);
+      globalEntries = parseGithubTrendingRss(await response.text(), new Date().toISOString(), expectedDate);
+      if (globalEntries.length < 5) throw new Error(`备用源仅返回 ${globalEntries.length} 条`);
+      warnings.push(`GitHub 官方 Trending 页面不可达，已使用同日期社区镜像：${officialError}`);
+    } catch (error) {
+      throw new Error(`GitHub ${expectedDate} 全球 Today 榜不可用。官方页面：${officialError}；备用源：${errorMessage(error)}`);
+    }
   }
+  const entries: TrendingRepository[] = [];
+  const seen = new Set<string>();
+  const skipped = new Set<string>();
+  const append = (items: TrendingRepository[], source: string) => {
+    for (const item of items) {
+      const key = item.repo.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (excludedRepos.has(key)) { skipped.add(key); continue; }
+      if (entries.length < targetCount) entries.push({...item, rank: entries.length + 1, rankingSource: source});
+    }
+  };
+  append(globalEntries, '全球 Today');
+  const globalCount = entries.length;
+  const failedLanguages: string[] = [];
+  for (const language of supplementalLanguages) {
+    if (entries.length >= targetCount) break;
+    try {
+      const response = await fetchWithRetry(`https://github.com/trending/${language}?since=daily`);
+      const fetchedAt = new Date().toISOString();
+      if (currentChinaDate(new Date(fetchedAt)) !== expectedDate) throw new Error('已跨越目标日期');
+      append(parseGithubTrendingHtml(await response.text(), fetchedAt), `${language} Today 分榜`);
+    } catch { failedLanguages.push(language); }
+  }
+  if (entries.length > globalCount) warnings.push(`全球 Today 榜可用 ${globalCount} 条，已从同日语言分榜补充至 ${entries.length} 条；补充项不是全球榜原始名次`);
+  if (entries.length < targetCount) warnings.push(`全球榜与同日语言分榜合计仅有 ${entries.length} 个未锁定仓库，未达到目标 ${targetCount} 个${failedLanguages.length ? `；部分分榜获取失败：${failedLanguages.join('、')}` : ''}`);
+  return {entries, warnings, skippedLocked: skipped.size};
 }
 
 type ProfileCache = Record<string, {fetchedAt: string; profile: RepositoryProfile}>;
@@ -114,21 +146,30 @@ const githubHeaders = () => ({
 
 async function fetchRepositoryProfile(entry: TrendingRepository): Promise<RepositoryProfile> {
   try {
-    const [metadataResponse, readmeResponse] = await Promise.all([
+    const [metadataResponse, readmeResponse, languagesResponse] = await Promise.all([
       fetchWithRetry(`https://api.github.com/repos/${entry.repo}`, 2, githubHeaders()),
       fetch(`https://api.github.com/repos/${entry.repo}/readme`, {
         headers: {...githubHeaders(), accept: 'application/vnd.github.raw+json', 'user-agent': 'GitHub-Tool-Radar/1.0'},
         signal: AbortSignal.timeout(20_000),
       }),
+      fetch(`https://api.github.com/repos/${entry.repo}/languages`, {
+        headers: githubHeaders(), signal: AbortSignal.timeout(20_000),
+      }).catch(() => undefined),
     ]);
     const metadata = await metadataResponse.json() as any;
     const readme = readmeResponse.ok ? await readmeResponse.text() : '';
+    const languageData: unknown = languagesResponse?.ok ? await languagesResponse.json().catch(() => ({})) : {};
+    const languageBytes = languageData && typeof languageData === 'object' && !Array.isArray(languageData)
+      ? languageData as Record<string, unknown> : {};
+    const languages = Object.entries(languageBytes).filter((item): item is [string, number] =>
+      typeof item[1] === 'number' && Number.isFinite(item[1]) && item[1] >= 0)
+      .map(([name, bytes]) => ({name, bytes}));
     const homepage = typeof metadata.homepage === 'string' && /^https?:\/\//.test(metadata.homepage) ? metadata.homepage : undefined;
     return {
       ...entry, description: metadata.description || entry.description, language: metadata.language || entry.language,
       totalStars: metadata.stargazers_count, forks: metadata.forks_count, topics: Array.isArray(metadata.topics) ? metadata.topics : [],
       license: metadata.license?.spdx_id && metadata.license.spdx_id !== 'NOASSERTION' ? metadata.license.spdx_id : undefined,
-      homepage, archived: Boolean(metadata.archived), repoUpdatedAt: metadata.updated_at || undefined, readme,
+      homepage, archived: Boolean(metadata.archived), repoUpdatedAt: metadata.updated_at || undefined, readme, languages,
     };
   } catch (error) {
     const detail = errorMessage(error);

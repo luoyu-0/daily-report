@@ -1,5 +1,6 @@
 import type {CSSProperties} from 'react';
 import type {BrandConfig, ToolCandidate} from '../shared/types';
+import {languageSummary} from '../shared/languages';
 
 export function ToolCard({tool, brand, index, total, style}: {
   tool: ToolCandidate; brand: BrandConfig; index: number; total: number; style?: CSSProperties;
@@ -9,16 +10,12 @@ export function ToolCard({tool, brand, index, total, style}: {
     fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif', background: `linear-gradient(135deg,#fff 0%,${brand.background} 60%,${brand.paleBlue} 170%)`,
     display: 'grid', gridTemplateRows: 'auto 1fr auto', gap: 26, position: 'relative', overflow: 'hidden', ...style,
   }}>
-    <header style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+    <header style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 21}}>
       <div style={{display: 'flex', gap: 16, alignItems: 'center'}}><b style={{color: brand.primary}}>{brand.name}</b><span>·</span><strong>{tool.toolType}</strong></div>
       <b style={{color: brand.primary}}>{String(index + 1).padStart(2, '0')} / {String(total).padStart(2, '0')}</b>
     </header>
     <div style={{display: 'grid', gridTemplateColumns: '1.35fr .75fr', gap: 54, minHeight: 0}}>
       <section style={{display: 'flex', flexDirection: 'column', justifyContent: 'center'}}>
-        <div style={{display: 'flex', gap: 12, marginBottom: 20}}>
-          <span style={{padding: '8px 14px', borderRadius: 999, color: brand.primary, background: brand.paleBlue, fontWeight: 900}}>Trending #{tool.rank}</span>
-          <span style={{padding: '8px 14px', borderRadius: 999, color: '#0369a1', background: '#e0f2fe', fontWeight: 900}}>实用性 {tool.utilityScore}</span>
-        </div>
         <h1 style={{fontSize: 62, lineHeight: 1.15, margin: 0, overflowWrap: 'anywhere'}}>{tool.repo}</h1>
         <p style={{fontSize: 31, lineHeight: 1.55, color: '#334155', margin: '28px 0'}}>{tool.oneLinePitchZh}</p>
         <div style={{display: 'grid', gap: 12}}>{tool.useCases.slice(0, 3).map((item, i) => <div key={item} style={{fontSize: 23, display: 'flex', gap: 12}}><b style={{color: brand.primary}}>0{i + 1}</b><span>{item}</span></div>)}</div>
@@ -27,12 +24,12 @@ export function ToolCard({tool, brand, index, total, style}: {
         <h2 style={{fontSize: 25, margin: '0 0 22px'}}>仓库速览</h2>
         <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, fontSize: 20}}>
           <div><small>Today</small><strong style={{display: 'block', fontSize: 27}}>+{tool.starsToday ?? '—'} ★</strong></div>
-          <div><small>Language</small><strong style={{display: 'block', fontSize: 24}}>{tool.language ?? '—'}</strong></div>
+          <div><small>Language</small><strong style={{display: 'block', fontSize: 24}}>{languageSummary(tool)}</strong></div>
           <div><small>License</small><strong style={{display: 'block', fontSize: 24}}>{tool.license ?? '未识别'}</strong></div>
           <div><small>适合</small><strong style={{display: 'block', fontSize: 21}}>{tool.targetUsers.slice(0, 2).join('、')}</strong></div>
         </div>
       </aside>
     </div>
-    <footer style={{display: 'flex', justifyContent: 'space-between', gap: 28, color: '#64748b'}}><span>所有结论来自仓库公开资料</span><strong style={{overflowWrap: 'anywhere', textAlign: 'right'}}>{tool.url}</strong></footer>
+    <footer style={{display: 'flex', justifyContent: 'flex-end', gap: 28, color: '#64748b', fontSize: 19}}><strong style={{overflowWrap: 'anywhere', textAlign: 'right'}}>{tool.url}</strong></footer>
   </article>;
 }

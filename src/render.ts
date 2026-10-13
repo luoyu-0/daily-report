@@ -8,7 +8,7 @@ import {renderMedia, selectComposition} from '@remotion/renderer';
 import {chromium} from 'playwright';
 import ffprobe from 'ffprobe-static';
 import {config} from './config.js';
-import {getEdition, logEvent, saveRenderJob, updateEditionStatus} from './db.js';
+import {getEdition, logEvent, relockRenderedRepos, saveRenderJob, updateEditionStatus} from './db.js';
 import type {DiscoveryEdition, RenderJob} from './shared/types.js';
 import {totalDurationFrames, VIDEO_FPS} from './video/timeline.js';
 
@@ -68,6 +68,7 @@ export async function renderEdition(editionId: string, job?: RenderJob): Promise
     const metadata = await validateVideo(outputPath, edition);
     fs.writeFileSync(outputPath.replace(/\.mp4$/, '.json'), JSON.stringify({editionId, renderedAt: new Date().toISOString(), metadata, hasBgm}, null, 2));
     updateEditionStatus(editionId, 'rendered');
+    relockRenderedRepos(currentEdition);
     logEvent(editionId, 'render', '渲染完成', {jobId: activeJob.id, outputPath, metadata});
     updateJob(activeJob, {status: 'completed', progress: 100, outputPath, logs: [...activeJob.logs, '渲染与编码检查完成']});
     return outputPath;

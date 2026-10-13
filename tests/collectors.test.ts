@@ -1,5 +1,7 @@
-import {describe, expect, it} from 'vitest';
-import {parseGithubTrendingHtml, parseGithubTrendingRss} from '../src/pipeline/collectors.js';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {collectGithubTrending, parseGithubTrendingHtml, parseGithubTrendingRss} from '../src/pipeline/collectors.js';
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('GitHub Trending 解析', () => {
   it('按页面顺序解析全球 Today 仓库及榜单指标', () => {
@@ -23,5 +25,23 @@ describe('GitHub Trending 解析', () => {
     const xml = `<?xml version="1.0"?><rss><channel><pubDate>Thu, 08 Oct 2026 06:50:58 GMT</pubDate><item><title>openai/codex</title><link>https://github.com/openai/codex</link></item></channel></rss>`;
     expect(() => parseGithubTrendingRss(xml, '2026-10-10T01:00:00.000Z', '2026-10-10'))
       .toThrow('不会使用历史榜单');
+  });
+
+  it('全球 Today 不足 15 条时从同日语言分榜补足，并跳过已锁定仓库', async () => {
+    const articles = (start: number, count: number) => Array.from({length: count}, (_, index) =>
+      `<article><h2><a href="/owner/tool-${start + index}">owner/tool-${start + index}</a></h2><p>Useful tool</p></article>`).join('');
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url === 'https://github.com/trending?since=daily') return new Response(articles(1, 8), {status: 200});
+      if (url.includes('/trending/typescript?')) return new Response(articles(9, 12), {status: 200});
+      return new Response('', {status: 404});
+    }));
+    const {currentChinaDate} = await import('../src/shared/date.js');
+    const result = await collectGithubTrending(currentChinaDate(), new Set(['owner/tool-1', 'owner/tool-2']), 15);
+    expect(result.entries).toHaveLength(15);
+    expect(result.entries.some((entry) => ['owner/tool-1', 'owner/tool-2'].includes(entry.repo))).toBe(false);
+    expect(result.entries[0].repo).toBe('owner/tool-3');
+    expect(result.entries.at(-1)?.repo).toBe('owner/tool-17');
+    expect(result.warnings.join(' ')).toContain('语言分榜');
   });
 });

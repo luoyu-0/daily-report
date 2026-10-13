@@ -26,7 +26,7 @@ const showProgress = ({phase, completed, total}: DailyProgress) => {
 let collectionError = '';
 try {
   const result = await buildCandidates(date, undefined, showProgress);
-  console.log(`已创建 ${result.edition.id}，今日新仓库候选 ${result.edition.candidates.length} 条；历史跳过 ${result.skippedHistorical} 条，同日复用 ${result.reusedToday} 条。`);
+  console.log(`已创建 ${result.edition.id}，今日可选仓库 ${result.edition.candidates.length} 条；往期成片锁定跳过 ${result.skippedHistorical} 条，同日复用 ${result.reusedToday} 条。`);
   console.log('本次未调用 LLM；已保留同日缓存中的审核及 LLM 文案，可在审核台按需优化。');
   if (result.warnings.length) console.warn(`警告：\n- ${result.warnings.join('\n- ')}`);
   if (process.argv.includes('--no-review')) {

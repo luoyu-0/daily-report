@@ -6,7 +6,7 @@ import fastifyStatic from '@fastify/static';
 import {z} from 'zod';
 import {config} from './config.js';
 import {
-  createRenderJob, forkEdition, getEdition, getEditionEvents, getLatestEdition, getRenderJob, logEvent,
+  createRenderJob, forkEdition, getEdition, getEditionEvents, getLatestEdition, getLockedRepos, getRenderJob, getTodayLockedRepos, logEvent, resetTodayRepoLock,
   updateEditionStatus, upsertCandidate,
 } from './db.js';
 import {buildCandidates, mapWithConcurrency} from './pipeline/run.js';
@@ -14,6 +14,7 @@ import {buildToolEvidence, enrichToolWithLlm} from './pipeline/llm.js';
 import {toolCandidateSchema, type DiscoveryEdition} from './shared/types.js';
 import {REVIEW_API_VERSION, REVIEW_APP_ID} from './shared/review-contract.js';
 import {renderEdition} from './render.js';
+import {currentChinaDate} from './shared/date.js';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const editSchema = toolCandidateSchema.pick({
@@ -45,6 +46,14 @@ export async function createApp(serveWeb = false) {
   app.get('/api/editions/:id/events', async (request, reply) => {
     const id = (request.params as {id: string}).id;
     return getEdition(id) ? getEditionEvents(id) : reply.code(404).send({error: '日报不存在'});
+  });
+  app.get('/api/repo-locks', async () => ({repos: getLockedRepos()}));
+  app.get('/api/repo-locks/today', async () => ({date: currentChinaDate(), repos: getTodayLockedRepos(currentChinaDate())}));
+  app.post('/api/repo-locks/today/reset', async (request, reply) => {
+    const {repo} = z.object({repo: z.string().min(3)}).parse(request.body);
+    const date = currentChinaDate();
+    if (!resetTodayRepoLock(date, repo)) return reply.code(404).send({error: '该仓库今天没有已渲染的锁定记录'});
+    return {date, repos: getTodayLockedRepos(date)};
   });
   app.post('/api/editions', async (request, reply) => {
     const body = z.object({date: dateSchema}).parse(request.body);
@@ -119,7 +128,7 @@ export async function createApp(serveWeb = false) {
     if (approvalError) return reply.code(400).send({error: approvalError});
     const selected = edition.candidates.filter((item) => item.selected);
     const approved = updateEditionStatus(edition.id, 'approved');
-    logEvent(edition.id, 'approval', '人工批准并锁定工具日报', {selectedIds: selected.map((item) => item.id)});
+    logEvent(edition.id, 'approval', '人工批准工具日报；成功渲染后锁定入选仓库', {selectedIds: selected.map((item) => item.id)});
     return approved;
   });
   app.post('/api/editions/:id/render', async (request, reply) => {
