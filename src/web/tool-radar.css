@@ -48,3 +48,42 @@
 .confirm-dialog h2 { margin: 0 0 12px; font-size: 23px; }
 .confirm-dialog p { margin: 0; line-height: 1.7; color: #475569; }
 .confirm-dialog > div { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.card-actions .danger { border-color: #fecaca; background: #fff1f2; color: #b91c1c; }
+.card-actions .danger:hover:not(:disabled) { border-color: #dc2626; background: #fee2e2; color: #991b1b; }
+body { min-width: 0; }
+.review-shell { min-height: 100vh; padding: 30px; background: #f4f8ff; }
+.review-heading { padding: 0 4px 24px; }
+.review-heading h1 { margin: 10px 0 0; font-size: 32px; }
+.review-layout { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 28px; min-height: calc(100vh - 130px); padding: 24px; border: 1px solid #dbeafe; border-radius: 24px; background: #fff; }
+.review-nav { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 15px; border: 1px solid #dbeafe; border-radius: 18px; background: #f8fbff; }
+.review-nav button { display: flex; align-items: center; justify-content: space-between; text-align: left; border-color: transparent; background: transparent; }
+.review-nav button.active { border-color: #bfdbfe; background: #dbeafe; color: #1d4ed8; }
+.review-nav small { color: #64748b; }
+.review-content { min-width: 0; }
+.review-page-head { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 6px 4px 22px; border-bottom: 1px solid #e2e8f0; }
+.review-page-head h2 { margin: 0; font-size: 27px; }
+.review-content .global-error, .review-content .job { margin: 18px 0 0; }
+.overview-page, .candidate-page, .render-page { padding-top: 22px; }
+.overview-page > p { color: #475569; line-height: 1.7; }
+.overview-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 24px 0; }
+.overview-stats > div { display: flex; flex-direction: column; gap: 8px; padding: 24px; border: 1px solid #dbeafe; border-radius: 16px; background: #f8fbff; }
+.overview-stats strong { color: #1d4ed8; font-size: 34px; }
+.overview-stats span { color: #64748b; }
+.overview-actions, .page-actions, .render-actions { display: flex; align-items: center; gap: 14px; }
+.overview-page .github-panel { margin-top: 24px; }
+.page-actions { justify-content: space-between; margin-bottom: 20px; }
+.page-actions label { display: flex; align-items: center; gap: 10px; color: #475569; }
+.candidate-page .candidate-list { margin-top: 16px; }
+.review-content .locked-repos { margin: 22px 0 0; }
+.review-content .locked-repo-list { max-height: none; }
+.render-actions { justify-content: space-between; margin-bottom: 22px; }
+.render-actions p { margin: 0; color: #475569; }
+.render-page .preview-panel { position: static; width: min(100%, 1080px); margin: 0 auto; }
+@media (max-width: 900px) {
+  .review-shell { padding: 14px; }
+  .review-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 16px; }
+  .review-nav { flex-direction: row; overflow-x: auto; }
+  .review-nav button { white-space: nowrap; }
+  .compare { grid-template-columns: 1fr; }
+  .overview-stats { grid-template-columns: 1fr; }
+}

@@ -1,6 +1,7 @@
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import type {FastifyInstance} from 'fastify';
 import {createApp, getOptimizationTargets, validateApproval} from '../src/server.js';
+import {REVIEW_API_VERSION} from '../src/shared/review-contract.js';
 import type {DiscoveryEdition, ToolCandidate} from '../src/shared/types.js';
 
 const tool = (index: number, confirmed = true): ToolCandidate => ({
@@ -28,7 +29,7 @@ describe('本地审核 API', () => {
     const response = await app.inject({method: 'GET', url: '/api/health'});
     expect(response.statusCode).toBe(200);
     expect(response.json().ok).toBe(true);
-    expect(response.json()).toMatchObject({app: 'github-tool-radar', apiVersion: 3});
+    expect(response.json()).toMatchObject({app: 'github-tool-radar', apiVersion: REVIEW_API_VERSION});
   });
 
   it('拒绝渲染不存在的日报', async () => {

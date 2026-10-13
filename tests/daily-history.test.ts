@@ -223,4 +223,21 @@ describe('本地日报复用', () => {
       expect(jobs.count).toBe(0);
     } finally { await app.close(); }
   });
+
+  it('草稿经二次确认后直接启动渲染，不需要单独批准操作', async () => {
+    const result = await buildCandidates('2026-10-18', [113, 114, 115].map((number) => profile(number)));
+    const {createApp} = await import('../src/server.js');
+    let statusAtRender = '';
+    const app = await createApp(false, async (id) => {
+      statusAtRender = (sqlite.prepare('SELECT status FROM editions WHERE id=?').get(id) as {status: string}).status;
+      return '';
+    });
+    try {
+      const response = await app.inject({method: 'POST', url: `/api/editions/${result.edition.id}/render`, payload: {confirm: true}});
+      expect(response.statusCode).toBe(202);
+      expect(statusAtRender).toBe('approved');
+      const jobs = sqlite.prepare('SELECT COUNT(*) AS count FROM render_jobs WHERE edition_id=?').get(result.edition.id) as {count: number};
+      expect(jobs.count).toBe(1);
+    } finally { await app.close(); }
+  });
 });

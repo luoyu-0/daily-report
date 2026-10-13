@@ -39,7 +39,7 @@ export function validateApproval(edition: DiscoveryEdition): string | undefined 
 export const getOptimizationTargets = (edition: DiscoveryEdition) =>
   edition.candidates.filter((item) => item.generationMethod !== 'llm');
 
-export async function createApp(serveWeb = false) {
+export async function createApp(serveWeb = false, launchRender = renderEdition) {
   const app = Fastify({logger: true, bodyLimit: 1_000_000});
 
   app.get('/api/health', async () => ({ok: true, app: REVIEW_APP_ID, apiVersion: REVIEW_API_VERSION, time: new Date().toISOString()}));
@@ -145,7 +145,7 @@ export async function createApp(serveWeb = false) {
       logEvent(edition.id, 'approval', '用户二次确认并开始渲染', {selectedRepos: edition.candidates.filter((item) => item.selected).map((item) => item.repo)});
     }
     const job = createRenderJob(edition.id);
-    void renderEdition(edition.id, job).catch((error) => app.log.error(error));
+    void launchRender(edition.id, job).catch((error) => app.log.error(error));
     return reply.code(202).send(job);
   });
   app.get('/api/render-jobs/:id', async (request, reply) => getRenderJob((request.params as {id: string}).id) ?? reply.code(404).send({error: '任务不存在'}));

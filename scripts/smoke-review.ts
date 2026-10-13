@@ -17,22 +17,25 @@ try {
   }));
   await page.goto(address, {waitUntil: 'networkidle'});
   await page.getByRole('heading', {name: /审核台/}).waitFor();
-  await page.getByRole('button', {name: '已锁定仓库（1）'}).click();
-  await page.getByRole('region', {name: '以往锁定仓库'}).getByRole('link', {name: 'example/locked-tool'}).waitFor();
+  const radarCount = await page.locator('.github-grid article').count();
+  if (radarCount !== edition.candidates.length) throw new Error('概览页未展示完整的今日可选仓库');
+  await page.getByRole('button', {name: '预览成片'}).click();
+  await page.locator('.preview-panel').waitFor();
+  await page.getByRole('navigation', {name: '审核台导航'}).getByRole('button', {name: /锁定记录/}).click();
+  await page.locator('.locked-repos').getByRole('link', {name: 'example/locked-tool'}).waitFor();
+  await page.getByRole('navigation', {name: '审核台导航'}).getByRole('button', {name: '仓库候选'}).click();
   const cards = page.locator('.editor-card');
   const cardCount = await cards.count();
-  const radarCount = await page.locator('.github-grid article').count();
+  if (cardCount < 1) throw new Error(`审核卡片不足：${cardCount}`);
+  if (await page.locator('.github-panel').count()) throw new Error('仓库候选页仍显示今日可选仓库卡片');
+  if (radarCount !== cardCount) throw new Error(`概览热榜 ${radarCount} 条与审核候选 ${cardCount} 条不一致`);
+  await page.getByRole('navigation', {name: '审核台导航'}).getByRole('button', {name: '成片渲染'}).click();
   const previewText = await page.locator('.preview-panel').textContent();
   const videoText = await page.locator('.video-frame').textContent();
-  if (cardCount < 1) throw new Error(`审核卡片不足：${cardCount}`);
-  if (radarCount !== cardCount) throw new Error(`热榜 ${radarCount} 条与候选 ${cardCount} 条不一致`);
   if (!previewText?.includes('完整成片预览')) throw new Error('未找到 Remotion 预览区域');
   if (!videoText?.includes('GitHub 工具雷达')) throw new Error('Remotion 预览组件未渲染品牌片头');
   const pageText = await page.locator('body').textContent();
   if (pageText?.includes('README 快速开始') || pageText?.includes('注意事项（每行一项）')) throw new Error('审核台仍显示安装命令或注意事项编辑区');
-  const firstCard = cards.first();
-  if (await firstCard.getByRole('button', {name: '保存', exact: true}).count()) throw new Error('仍存在保存按钮');
-  if (await firstCard.getByRole('button', {name: '更新入选'}).count()) throw new Error('仍存在更新入选按钮');
   const renderButton = page.getByRole('button', {name: '渲染成片'});
   await renderButton.click();
   const confirmation = page.getByRole('dialog', {name: '确认渲染成片'});
@@ -41,6 +44,11 @@ try {
   await page.waitForTimeout(3200);
   if (await confirmation.getByRole('button', {name: '确认并渲染'}).isDisabled()) throw new Error('三秒后仍不能确认渲染');
   await confirmation.getByRole('button', {name: '返回审核'}).click();
+  await page.getByRole('navigation', {name: '审核台导航'}).getByRole('button', {name: '仓库候选'}).click();
+  const firstCard = cards.first();
+  if (await firstCard.getByRole('button', {name: '保存', exact: true}).count()) throw new Error('仍存在保存按钮');
+  if (await firstCard.getByRole('button', {name: '更新入选'}).count()) throw new Error('仍存在更新入选按钮');
+  if (await firstCard.getByRole('button', {name: '取消入选'}).count() && !await firstCard.getByRole('button', {name: '取消入选'}).evaluate((button) => getComputedStyle(button).color === 'rgb(185, 28, 28)')) throw new Error('取消入选按钮未使用红色警示样式');
   let regenerateRequests = 0;
   await page.route('**/api/editions/*/candidates/*/regenerate', async (route) => {
     regenerateRequests += 1;
@@ -98,7 +106,13 @@ try {
   await compatibilityPage.goto(address, {waitUntil: 'networkidle'});
   await compatibilityPage.getByRole('button', {name: '创建今日工具雷达'}).click();
   await compatibilityPage.getByText(/审核服务版本不兼容/).waitFor({timeout: 2_000});
-  console.log(JSON.stringify({ok: true, cardCount, radarCount, preview: '品牌片头已渲染', duplicateLlmRequests: regenerateRequests, autosaved: true, delayedConfirmation: true, selectedPatch, staleApi: '已显示兼容错误'}, null, 2));
+  const staleServicePage = await browser.newPage({viewport: {width: 1200, height: 800}});
+  await staleServicePage.route('**/api/health', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ok: true, app: 'github-tool-radar', apiVersion: 3}),
+  }));
+  await staleServicePage.goto(address, {waitUntil: 'networkidle'});
+  await staleServicePage.getByText(/审核服务版本过旧/).waitFor({timeout: 2_000});
+  console.log(JSON.stringify({ok: true, cardCount, radarCount, preview: '品牌片头已渲染', duplicateLlmRequests: regenerateRequests, autosaved: true, delayedConfirmation: true, selectedPatch, staleApi: '已显示兼容错误', staleService: '已提示重启'}, null, 2));
 } finally {
   await browser.close();
   await app.close();
