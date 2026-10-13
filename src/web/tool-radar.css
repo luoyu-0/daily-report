@@ -76,6 +76,24 @@ body { min-width: 0; }
 .page-actions { justify-content: space-between; margin-bottom: 20px; }
 .page-actions label { display: flex; align-items: center; gap: 10px; color: #475569; }
 .candidate-page .candidate-list { margin-top: 16px; }
+.candidate-navigator { position: fixed; z-index: 30; top: 50%; right: 0; width: min(300px, calc(100vw - 48px)); transform: translate(100%, -50%); transition: transform 250ms ease; }
+.candidate-navigator.open { transform: translate(0, -50%); }
+.candidate-nav-handle { position: absolute; z-index: 1; top: 50%; left: -40px; display: grid; place-items: center; width: 40px; height: 104px; padding: 0; transform: translateY(-50%); border: 0; border-radius: 0; background: transparent; color: #2563eb; }
+.candidate-nav-shape { position: absolute; top: -12px; left: 0; width: 42px; height: 128px; pointer-events: none; }
+.candidate-nav-chevron { position: relative; pointer-events: none; }
+.candidate-nav-handle:focus-visible { outline: none; }
+.candidate-nav-handle:focus-visible .candidate-nav-chevron { filter: drop-shadow(0 0 3px #60a5fa); }
+.candidate-nav-panel { display: flex; flex-direction: column; gap: 5px; padding: 12px; border: 1px solid #bfdbfe; border-radius: 16px 0 0 16px; background: #fff; box-shadow: -12px 10px 32px rgba(15,23,42,.14); }
+.candidate-nav-panel > strong { font-size: 16px; }
+.candidate-nav-panel > small { color: #64748b; }
+.candidate-nav-list { display: flex; flex-direction: column; gap: 3px; }
+.candidate-nav-list button { display: flex; align-items: center; gap: 7px; width: 100%; padding: 6px 8px; border-color: transparent; background: #f8fbff; text-align: left; font-size: 11px; line-height: 16px; }
+.candidate-nav-list button:hover { background: #dbeafe; }
+.candidate-nav-list button span:first-child { flex: none; color: #2563eb; font-weight: 900; }
+.candidate-nav-list button span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidate-nav-list button span:last-child:not(:nth-child(2)) { margin-left: auto; color: #15803d; }
+.candidate-nav-list p { color: #64748b; font-size: 12px; }
+.editor-card:focus { outline: 2px solid #2563eb; outline-offset: 3px; }
 .review-content .locked-repos { margin: 22px 0 0; }
 .review-content .locked-repo-list { max-height: none; }
 .render-actions { justify-content: space-between; margin-bottom: 22px; }

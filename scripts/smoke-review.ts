@@ -39,6 +39,24 @@ try {
   if (cardCount < 1) throw new Error(`审核卡片不足：${cardCount}`);
   if (await page.locator('.github-panel').count()) throw new Error('仓库候选页仍显示今日可选仓库卡片');
   if (radarCount !== cardCount) throw new Error(`概览热榜 ${radarCount} 条与审核候选 ${cardCount} 条不一致`);
+  const navigator = page.getByLabel('候选仓库快捷导航');
+  await page.setViewportSize({width: 1600, height: 720});
+  await navigator.getByRole('button', {name: '展开仓库导航'}).click();
+  if (await navigator.getByRole('button', {name: '收起仓库导航'}).getAttribute('aria-expanded') !== 'true') throw new Error('仓库导航未展开');
+  if (await navigator.locator('.candidate-nav-list button').count() !== cardCount) throw new Error('快捷导航未列出全部候选仓库');
+  const listFits = await navigator.locator('.candidate-nav-list').evaluate((list) => {
+    const bounds = list.getBoundingClientRect();
+    return list.scrollHeight <= list.clientHeight && bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+  });
+  if (!listFits) throw new Error('15 条候选未能在导航栏中一次展示完');
+  const lastCardId = await cards.last().getAttribute('id');
+  await navigator.locator('.candidate-nav-list button').last().click();
+  if (await page.evaluate(() => document.activeElement?.id) !== lastCardId) throw new Error('快捷导航未定位到对应仓库卡片');
+  if (await navigator.getByRole('button', {name: '展开仓库导航'}).getAttribute('aria-expanded') !== 'false') throw new Error('跳转后仓库导航未收起');
+  await navigator.getByRole('button', {name: '展开仓库导航'}).click();
+  await page.locator('.industry-title').click();
+  if (await navigator.getByRole('button', {name: '展开仓库导航'}).getAttribute('aria-expanded') !== 'false') throw new Error('点击导航栏外部后未收起');
+  await page.setViewportSize({width: 1600, height: 1000});
   await page.getByRole('navigation', {name: '审核台导航'}).getByRole('button', {name: '成片渲染'}).click();
   const previewText = await page.locator('.preview-panel').textContent();
   const videoText = await page.locator('.video-frame').textContent();

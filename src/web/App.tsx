@@ -43,6 +43,52 @@ function TrendingRadar({tools}: {tools: ToolCandidate[]}) {
   return <section className="github-panel"><div className="section-title"><div><div className="eyebrow">GITHUB · TRENDING · TODAY</div><h2>今日可选仓库</h2></div><span className="auto-badge">已跳过成片锁定仓库</span></div><div className="github-grid">{tools.length === 0 && <p>今日榜单暂无可选仓库。</p>}{[...tools].sort((a, b) => a.rank - b.rank).map((tool) => <article key={tool.id}><strong>#{tool.rank}</strong><div><h3>{tool.repo} {tool.rankingSource && <small className="ranking-source">{tool.rankingSource}</small>}</h3><p>{tool.oneLinePitchZh}</p><a href={tool.url} target="_blank" rel="noreferrer">查看仓库 ↗</a></div><span className="topic-tag">+{tool.starsToday ?? '—'} ★</span></article>)}</div></section>;
 }
 
+function CandidateNavigator({tools}: {tools: ToolCandidate[]}) {
+  const [open, setOpen] = useState(false);
+  const drawer = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!drawer.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+  const navigate = (id: string) => {
+    const card = document.getElementById(`candidate-${id}`);
+    card?.scrollIntoView({behavior: 'smooth', block: 'start'});
+    card?.focus({preventScroll: true});
+    setOpen(false);
+  };
+  return <aside ref={drawer} className={`candidate-navigator${open ? ' open' : ''}`} aria-label="候选仓库快捷导航"
+    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+    <button className="candidate-nav-handle" type="button" aria-label={open ? '收起仓库导航' : '展开仓库导航'} aria-expanded={open}
+      aria-controls="candidate-nav-panel" onClick={() => setOpen((value) => !value)}>
+      <svg className="candidate-nav-shape" viewBox="0 0 42 128" aria-hidden="true">
+        <path d="M40.5 0 Q40.5 12 28.5 12 H12.5 Q.5 12 .5 24 V104 Q.5 116 12.5 116 H28.5 Q40.5 116 40.5 128 H42 V0 Z" fill="white"/>
+        <path d="M40.5 0 Q40.5 12 28.5 12 H12.5 Q.5 12 .5 24 V104 Q.5 116 12.5 116 H28.5 Q40.5 116 40.5 128" fill="none" stroke="#bfdbfe"/>
+      </svg>
+      <svg className="candidate-nav-chevron" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d={open ? 'm9 5.5 6 6.5-6 6.5' : 'm15 5.5-6 6.5 6 6.5'}/>
+      </svg>
+    </button>
+    <div id="candidate-nav-panel" className="candidate-nav-panel" aria-hidden={!open}>
+      <strong>快速查找仓库</strong><small>当前筛选 {tools.length} 项</small>
+      <div className="candidate-nav-list">{[...tools].sort((a, b) => a.rank - b.rank).map((tool) =>
+        <button key={tool.id} type="button" tabIndex={open ? 0 : -1} onClick={() => navigate(tool.id)} title={tool.repo}>
+          <span>#{String(tool.rank).padStart(2, '0')}</span><span>{tool.repo}</span>{tool.selected && <span aria-label="已入选">✓</span>}
+        </button>)}{tools.length === 0 && <p>当前筛选下没有仓库</p>}</div>
+    </div>
+  </aside>;
+}
+
 function ToolEditor({tool, onUpdate, onRegenerate, optimizing, optimizationLocked}: {
   tool: ToolCandidate; onUpdate: (repo: string, patch: Partial<ToolCandidate>) => Promise<void>; onRegenerate: (repo: string) => Promise<void>;
   optimizing: boolean; optimizationLocked: boolean;
@@ -74,7 +120,7 @@ function ToolEditor({tool, onUpdate, onRegenerate, optimizing, optimizationLocke
     setBusy(true);
     try { await persist(draft, selected); } finally { setBusy(false); }
   };
-  return <article className={`editor-card ${tool.selected ? 'selected' : ''}`}>
+  return <article id={`candidate-${tool.id}`} tabIndex={-1} className={`editor-card ${tool.selected ? 'selected' : ''}`}>
     <div className="card-top"><strong>候选 #{String(tool.rank).padStart(2, '0')}</strong>{tool.rankingSource && <span className="ranking-source">{tool.rankingSource}</span>}<span className="score">实用性 {tool.utilityScore}</span><span className={`method ${tool.generationMethod}`}>{tool.generationMethod === 'llm' ? 'LLM + 证据' : '规则提炼'}</span></div>
     <div className="compare"><section className="source-pane"><div className="eyebrow">仓库证据</div><h3>{tool.repo}</h3><p>{sourceOverview(tool)}</p><div className="repo-metrics"><span>{tool.language ?? '未知语言'}</span><span>{tool.license ?? '无许可证信息'}</span><span>{tool.totalStars?.toLocaleString() ?? '—'} Stars</span></div><a href={tool.url} target="_blank" rel="noreferrer">GitHub ↗</a>{tool.excludeReason && <div className="warning">非工具提示：{tool.excludeReason}</div>}</section>
       <section className="edit-pane" onBlur={() => { void persist(draft).catch(() => {}); }}><div className="edit-heading"><div className="eyebrow">推荐文案</div><select disabled={optimizationLocked} value={draft.toolType} onChange={(event) => setDraft({...draft, toolType: event.target.value as ToolType})}>{toolTypes.map((type) => <option key={type}>{type}</option>)}</select></div><input disabled={optimizationLocked} value={draft.oneLinePitchZh} onChange={(event) => setDraft({...draft, oneLinePitchZh: event.target.value})}/><label>使用场景（每行一项）</label><textarea disabled={optimizationLocked} value={draft.useCases.join('\n')} onChange={(event) => setDraft({...draft, useCases: lines(event.target.value)})}/><label>适合人群（每行一项）</label><textarea disabled={optimizationLocked} className="compact-textarea" value={draft.targetUsers.join('\n')} onChange={(event) => setDraft({...draft, targetUsers: lines(event.target.value)})}/></section></div>
@@ -186,7 +232,7 @@ export function App() {
       <div className="review-content"><div className="review-page-head"><div><div className="eyebrow">{edition.date} · v{edition.version}</div><h2>{pageTitles[activePage]}</h2></div><div className="status-block"><span className={`status ${edition.status}`}>{edition.status}</span><small>候选 {edition.candidates.length} 项 · 已入选 {selected.length} 项</small></div></div>
         {error && <div className="global-error">{error}<button onClick={() => setError('')}>×</button></div>}{optimizationMessage && <div className="global-error success">{optimizationMessage}<button onClick={() => setOptimizationMessage('')}>×</button></div>}{job && <div className={`job ${job.status}`}><div><strong>渲染任务：{job.status}</strong><span>{job.error || job.outputPath || job.logs.at(-1)}</span></div><progress max="100" value={job.progress}/><b>{job.progress}%</b></div>}
         {activePage === 'overview' && <main className="overview-page"><p>从今日 GitHub 热榜发现新工具，核对仓库证据与推荐文案，确认后生成视频。</p><div className="overview-stats"><div><strong>{edition.candidates.length}</strong><span>今日候选</span></div><div><strong>{selected.length}</strong><span>已入选</span></div><div><strong>{lockedRepos.length}</strong><span>成片锁定记录</span></div></div><div className="overview-actions"><button className="primary" onClick={() => setActivePage('candidates')}>审核仓库候选</button><button onClick={() => setActivePage('render')}>预览成片</button></div><TrendingRadar tools={edition.candidates}/></main>}
-        {activePage === 'candidates' && <main className="candidate-page"><div className="page-actions"><label>最低实用性 <input type="range" min="0" max="100" value={minScore} onChange={(event) => setMinScore(Number(event.target.value))}/><strong>{minScore}</strong></label><button onClick={optimize} disabled={edition.status !== 'draft' || optimizing || Boolean(optimizingToolId) || !llmTargets.length}>{optimizing ? 'LLM 优化中…' : 'LLM一键优化'}</button></div><div className="section-title industry-title"><div><div className="eyebrow">TOOLS · REVIEW</div><h2>工具候选</h2></div><span>新日报默认入选前 10 项，可逐项调整</span></div><div className="candidate-list">{filtered.map((tool) => <ToolEditor key={tool.id} tool={tool} onUpdate={update} onRegenerate={regenerate} optimizing={optimizingToolId === tool.repo} optimizationLocked={optimizing || Boolean(optimizingToolId)}/>)}</div></main>}
+        {activePage === 'candidates' && <main className="candidate-page"><div className="page-actions"><label>最低实用性 <input type="range" min="0" max="100" value={minScore} onChange={(event) => setMinScore(Number(event.target.value))}/><strong>{minScore}</strong></label><button onClick={optimize} disabled={edition.status !== 'draft' || optimizing || Boolean(optimizingToolId) || !llmTargets.length}>{optimizing ? 'LLM 优化中…' : 'LLM一键优化'}</button></div><div className="section-title industry-title"><div><div className="eyebrow">TOOLS · REVIEW</div><h2>工具候选</h2></div><span>新日报默认入选前 10 项，可逐项调整</span></div><div className="candidate-list">{filtered.map((tool) => <ToolEditor key={tool.id} tool={tool} onUpdate={update} onRegenerate={regenerate} optimizing={optimizingToolId === tool.repo} optimizationLocked={optimizing || Boolean(optimizingToolId)}/>)}</div><CandidateNavigator tools={filtered}/></main>}
         {activePage === 'locks' && <main className="locked-repos" aria-label="以往锁定仓库"><h2>已成片锁定仓库</h2>{lockedRepos.length === 0 ? <p>暂无锁定记录。只有入选并成功渲染成片的仓库才会出现在这里。</p> : <div className="locked-repo-list">{lockedRepos.map((item) => <div key={`${item.date}:${item.repo}`}><time>{item.date}</time><a href={`https://github.com/${item.repo}`} target="_blank" rel="noreferrer">{item.repo}</a><button className="danger" onClick={() => deleteLock(item.date, item.repo)}>删除锁定记录</button></div>)}</div>}</main>}
         {activePage === 'render' && <main className="render-page"><div className="render-actions"><p>将使用当前入选的 {selected.length} 个仓库。请先在“仓库候选”核对文案和来源。</p><button className="primary" onClick={() => { (document.activeElement as HTMLElement | null)?.blur(); setShowRenderConfirm(true); }} disabled={renderDisabled}>渲染成片</button></div><section className="preview-panel"><div className="preview-head"><div><div className="eyebrow">REMOTION · PLAYER</div><strong>完整成片预览</strong></div><span>{Math.round(totalDurationFrames(edition) / VIDEO_FPS)} 秒</span></div><div className="video-frame"><Player component={DailyReportVideo} inputProps={{edition, hasBgm: false}} durationInFrames={totalDurationFrames(edition)} fps={VIDEO_FPS} compositionWidth={VIDEO_WIDTH} compositionHeight={VIDEO_HEIGHT} controls loop clickToPlay style={{width: '100%', aspectRatio: '16 / 9'}}/></div><div className="preview-note">预览与正式 MP4 使用相同时间轴。项目没有被自动安装或运行，推荐依据仅来自公开仓库资料。</div></section></main>}
       </div></div>
