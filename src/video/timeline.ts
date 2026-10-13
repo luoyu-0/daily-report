@@ -1,17 +1,13 @@
 import type {DiscoveryEdition} from '../shared/types';
 
 export type TimelineSegment = {
-  type: 'intro' | 'radar' | 'tool';
+  type: 'intro' | 'radar' | 'tool' | 'outro';
   from: number; durationInFrames: number; toolIndex?: number;
 };
 
 export const VIDEO_FPS = 30;
 export const VIDEO_WIDTH = 1920;
 export const VIDEO_HEIGHT = 1080;
-
-export function toolDurationFrames(text: string): number {
-  return Math.max(12, Math.min(16, Math.ceil(text.length / 10))) * VIDEO_FPS;
-}
 
 export function buildTimeline(edition: DiscoveryEdition): TimelineSegment[] {
   const selected = edition.candidates.filter((item) => item.selected).sort((a, b) => a.position - b.position);
@@ -24,8 +20,9 @@ export function buildTimeline(edition: DiscoveryEdition): TimelineSegment[] {
   add({type: 'radar', durationInFrames: 15 * VIDEO_FPS});
   selected.forEach((tool, toolIndex) => add({
     type: 'tool', toolIndex,
-    durationInFrames: toolDurationFrames(`${tool.oneLinePitchZh}${tool.useCases.slice(0, 2).join('')}`),
+    durationInFrames: 8 * VIDEO_FPS,
   }));
+  add({type: 'outro', durationInFrames: 4 * VIDEO_FPS});
   return segments;
 }
 

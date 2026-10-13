@@ -6,7 +6,7 @@ import fastifyStatic from '@fastify/static';
 import {z} from 'zod';
 import {config} from './config.js';
 import {
-  createRenderJob, forkEdition, getEdition, getEditionEvents, getLatestEdition, getLockedRepos, getRenderJob, getTodayLockedRepos, logEvent, resetTodayRepoLock,
+  createRenderJob, deleteRepoLock, forkEdition, getEdition, getEditionEvents, getLatestEdition, getLockedRepos, getRenderJob, getTodayLockedRepos, logEvent, resetTodayRepoLock,
   updateEditionStatus, upsertCandidate,
 } from './db.js';
 import {buildCandidates, mapWithConcurrency} from './pipeline/run.js';
@@ -50,6 +50,11 @@ export async function createApp(serveWeb = false, launchRender = renderEdition) 
     return getEdition(id) ? getEditionEvents(id) : reply.code(404).send({error: '日报不存在'});
   });
   app.get('/api/repo-locks', async () => ({repos: getLockedRepos()}));
+  app.post('/api/repo-locks/delete', async (request, reply) => {
+    const {date, repo} = z.object({date: dateSchema, repo: z.string().min(3)}).parse(request.body);
+    if (!deleteRepoLock(date, repo)) return reply.code(404).send({error: '锁定记录不存在'});
+    return {repos: getLockedRepos()};
+  });
   app.get('/api/repo-locks/today', async () => ({date: currentChinaDate(), repos: getTodayLockedRepos(currentChinaDate())}));
   app.post('/api/repo-locks/today/reset', async (request, reply) => {
     const {repo} = z.object({repo: z.string().min(3)}).parse(request.body);

@@ -21,24 +21,26 @@ const edition: DiscoveryEdition = {
 };
 
 describe('视频时间轴', () => {
-  it('包含片头、热榜概览和十个工具，不再重复播放末尾清单', () => {
+  it('包含片头、15 秒热榜概览、十个 8 秒工具和简短片尾', () => {
     const types = buildTimeline(edition).map((item) => item.type);
     expect(types[0]).toBe('intro');
     expect(types[1]).toBe('radar');
     expect(types.filter((item) => item === 'tool')).toHaveLength(10);
-    expect(types.at(-1)).toBe('tool');
+    expect(types.at(-1)).toBe('outro');
+    expect(buildTimeline(edition)[1].durationInFrames).toBe(15 * VIDEO_FPS);
+    expect(buildTimeline(edition).filter((item) => item.type === 'tool').every((item) => item.durationInFrames === 8 * VIDEO_FPS)).toBe(true);
+    expect(buildTimeline(edition).at(-1)?.durationInFrames).toBeLessThanOrEqual(4 * VIDEO_FPS);
   });
 
   it('默认十个工具的时长不超过三分钟', () => {
     const seconds = totalDurationFrames(edition) / VIDEO_FPS;
-    expect(seconds).toBeGreaterThanOrEqual(130);
-    expect(seconds).toBeLessThanOrEqual(180);
+    expect(seconds).toBe(102);
   });
 
-  it('选择较少工具时缩短成片，时间轴仍以最后一条工具结束', () => {
+  it('选择较少工具时缩短成片，时间轴仍以片尾结束', () => {
     for (const count of [1, 5]) {
       const seconds = totalDurationFrames({...edition, candidates: edition.candidates.slice(0, count)}) / VIDEO_FPS;
-      expect(seconds).toBeGreaterThan(18);
+      expect(seconds).toBeGreaterThan(22);
       expect(seconds).toBeLessThan(totalDurationFrames(edition) / VIDEO_FPS);
     }
   });

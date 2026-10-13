@@ -35,6 +35,22 @@ function Radar({edition}: {edition: DiscoveryEdition}) {
   </AbsoluteFill></Fade>;
 }
 
+function Outro({edition}: {edition: DiscoveryEdition}) {
+  const frame = useCurrentFrame();
+  const rise = interpolate(frame, [0, 22], [28, 0], {extrapolateRight: 'clamp'});
+  const ruleWidth = interpolate(frame, [12, 42], [0, 520], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+  const opacity = interpolate(frame, [0, 12, 105, 120], [0, 1, 1, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+  return <AbsoluteFill style={{...base, background: edition.brand.background, color: edition.brand.ink, alignItems: 'center', justifyContent: 'center', opacity}}>
+    <div style={{position: 'absolute', width: 830, height: 830, borderRadius: '50%', border: `2px solid ${edition.brand.paleBlue}`}} />
+    <div style={{position: 'relative', textAlign: 'center', transform: `translateY(${rise}px)`}}>
+      <div style={{fontSize: 24, fontWeight: 900, letterSpacing: 6, color: edition.brand.primary}}>GITHUB · TRENDING · TODAY</div>
+      <h1 style={{fontSize: 79, margin: '30px 0 24px'}}>明天继续发现好工具</h1>
+      <div style={{width: ruleWidth, height: 5, margin: '0 auto 30px', borderRadius: 99, background: edition.brand.primary}} />
+      <div style={{fontSize: 31, fontWeight: 800, color: '#475569'}}>{edition.brand.name}</div>
+    </div>
+  </AbsoluteFill>;
+}
+
 export function DailyReportVideo({edition, hasBgm}: VideoProps) {
   const timeline = buildTimeline(edition);
   const selected = edition.candidates.filter((item) => item.selected).sort((a, b) => a.position - b.position);
@@ -42,6 +58,7 @@ export function DailyReportVideo({edition, hasBgm}: VideoProps) {
     {timeline.map((segment, index) => {
       const content = segment.type === 'intro' ? <Intro edition={edition} />
         : segment.type === 'radar' ? <Radar edition={edition} />
+        : segment.type === 'outro' ? <Outro edition={edition} />
         : <Fade><ToolCard tool={selected[segment.toolIndex!]} brand={edition.brand} index={segment.toolIndex!} total={selected.length} /></Fade>;
       return <Sequence key={`${segment.type}-${index}`} from={segment.from} durationInFrames={segment.durationInFrames}>{content}</Sequence>;
     })}

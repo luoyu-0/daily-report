@@ -12,9 +12,17 @@ try {
   await page.route('**/api/editions/latest', (route) => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify(edition),
   }));
+  let lockedRepos = [{date: '2026-10-11', repo: 'example/locked-tool'}];
   await page.route('**/api/repo-locks', (route) => route.fulfill({
-    status: 200, contentType: 'application/json', body: JSON.stringify({repos: [{date: '2026-10-11', repo: 'example/locked-tool'}]}),
+    status: 200, contentType: 'application/json', body: JSON.stringify({repos: lockedRepos}),
   }));
+  await page.route('**/api/repo-locks/delete', (route) => {
+    const body = route.request().postDataJSON() as {date: string; repo: string};
+    if (body.date !== '2026-10-11' || body.repo !== 'example/locked-tool') throw new Error('删除锁定记录请求缺少历史日期或仓库');
+    lockedRepos = [];
+    return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({repos: []})});
+  });
+  page.on('dialog', (dialog) => void dialog.accept());
   await page.goto(address, {waitUntil: 'networkidle'});
   await page.getByRole('heading', {name: /审核台/}).waitFor();
   const radarCount = await page.locator('.github-grid article').count();
@@ -23,6 +31,8 @@ try {
   await page.locator('.preview-panel').waitFor();
   await page.getByRole('navigation', {name: '审核台导航'}).getByRole('button', {name: /锁定记录/}).click();
   await page.locator('.locked-repos').getByRole('link', {name: 'example/locked-tool'}).waitFor();
+  await page.locator('.locked-repos').getByRole('button', {name: '删除锁定记录'}).click();
+  await page.locator('.locked-repos').getByText('暂无锁定记录').waitFor();
   await page.getByRole('navigation', {name: '审核台导航'}).getByRole('button', {name: '仓库候选'}).click();
   const cards = page.locator('.editor-card');
   const cardCount = await cards.count();
@@ -55,7 +65,6 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 600));
     await route.fulfill({status: 500, contentType: 'application/json', body: JSON.stringify({error: '测试请求已拦截'})});
   });
-  page.on('dialog', (dialog) => void dialog.accept());
   await page.evaluate(() => {
     const button = document.querySelector<HTMLButtonElement>('.editor-card button');
     button?.click();

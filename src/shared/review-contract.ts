@@ -1,2 +1,2 @@
 export const REVIEW_APP_ID = 'github-tool-radar';
-export const REVIEW_API_VERSION = 4;
+export const REVIEW_API_VERSION = 5;

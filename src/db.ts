@@ -177,7 +177,11 @@ export function getTodayLockedRepos(date: string): string[] {
 }
 
 export function resetTodayRepoLock(date: string, repo: string): boolean {
-  if (!getTodayLockedRepos(date).some((item) => item.toLowerCase() === repo.toLowerCase())) return false;
+  return deleteRepoLock(date, repo);
+}
+
+export function deleteRepoLock(date: string, repo: string): boolean {
+  if (!getLockedRepos().some((item) => item.date === date && item.repo.toLowerCase() === repo.toLowerCase())) return false;
   sqlite.prepare('INSERT OR REPLACE INTO repo_lock_resets (date,repo,reset_at) VALUES (?,?,?)')
     .run(date, repo.toLowerCase(), now());
   return true;

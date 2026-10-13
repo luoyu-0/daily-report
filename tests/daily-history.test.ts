@@ -12,6 +12,7 @@ let upsertCandidate: typeof import('../src/db.js').upsertCandidate;
 let createEdition: typeof import('../src/db.js').createEdition;
 let updateEditionStatus: typeof import('../src/db.js').updateEditionStatus;
 let getTodayLockedRepos: typeof import('../src/db.js').getTodayLockedRepos;
+let getToolHistory: typeof import('../src/db.js').getToolHistory;
 let resetTodayRepoLock: typeof import('../src/db.js').resetTodayRepoLock;
 let sqlite: typeof import('../src/db.js').sqlite;
 
@@ -27,7 +28,7 @@ beforeAll(async () => {
   process.env.DATA_DIR = dataDir;
   vi.resetModules();
   ({buildCandidates} = await import('../src/pipeline/run.js'));
-  ({upsertCandidate, createEdition, updateEditionStatus, getTodayLockedRepos, resetTodayRepoLock, sqlite} = await import('../src/db.js'));
+  ({upsertCandidate, createEdition, updateEditionStatus, getTodayLockedRepos, getToolHistory, resetTodayRepoLock, sqlite} = await import('../src/db.js'));
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -197,6 +198,23 @@ describe('本地日报复用', () => {
       const response = await app.inject({method: 'GET', url: '/api/repo-locks'});
       expect(response.statusCode).toBe(200);
       expect(response.json().repos).toContainEqual({date: '2026-10-06', repo: locked.repo});
+    } finally { await app.close(); }
+  });
+
+  it('允许删除历史日期的锁定记录，保留原成片与审核数据', async () => {
+    const historical = await buildCandidates('2026-10-05', [93].map((number) => profile(number)));
+    updateEditionStatus(historical.edition.id, 'rendered');
+    const repo = historical.edition.candidates[0].repo;
+    const {createApp} = await import('../src/server.js');
+    const app = await createApp(false);
+    try {
+      const response = await app.inject({method: 'POST', url: '/api/repo-locks/delete', payload: {date: '2026-10-05', repo}});
+      expect(response.statusCode).toBe(200);
+      expect(response.json().repos).not.toContainEqual({date: '2026-10-05', repo});
+      expect(getToolHistory('2026-10-06').previousRepos.has(repo.toLowerCase())).toBe(false);
+      expect((sqlite.prepare('SELECT status FROM editions WHERE id=?').get(historical.edition.id) as {status: string}).status).toBe('rendered');
+      const repeat = await app.inject({method: 'POST', url: '/api/repo-locks/delete', payload: {date: '2026-10-05', repo}});
+      expect(repeat.statusCode).toBe(404);
     } finally { await app.close(); }
   });
 

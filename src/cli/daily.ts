@@ -13,8 +13,8 @@ console.log(`正在读取 ${date} 的全球 GitHub Trending Today…`);
 let previousPhase = '';
 const showProgress = ({phase, completed, total}: DailyProgress) => {
   const label = phase === 'trending' ? '获取今日榜单' : phase === 'profiles' ? '获取仓库详情' : '整理候选';
-  const filled = total === 0 ? 20 : Math.round(completed / total * 20);
-  const line = `${label} [${'█'.repeat(filled)}${'░'.repeat(20 - filled)}] ${completed}/${total}`;
+  const filled = total <= 0 ? 0 : Math.max(0, Math.min(20, Math.round(completed / total * 20)));
+  const line = `${label} [${'='.repeat(filled)}${'-'.repeat(20 - filled)}] ${completed}/${total}`;
   if (process.stdout.isTTY) {
     process.stdout.write(`\r\x1b[2K${line}`);
     if (completed === total) process.stdout.write('\n');

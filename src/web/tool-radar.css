@@ -50,6 +50,8 @@
 .confirm-dialog > div { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .card-actions .danger { border-color: #fecaca; background: #fff1f2; color: #b91c1c; }
 .card-actions .danger:hover:not(:disabled) { border-color: #dc2626; background: #fee2e2; color: #991b1b; }
+.locked-repo-list .danger { border-color: #fecaca; color: #b91c1c; }
+.locked-repo-list .danger:hover:not(:disabled) { border-color: #dc2626; background: #fff1f2; color: #991b1b; }
 body { min-width: 0; }
 .review-shell { min-height: 100vh; padding: 30px; background: #f4f8ff; }
 .review-heading { padding: 0 4px 24px; }
