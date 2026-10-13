@@ -43,3 +43,8 @@
 .locked-repo-list time { color: #64748b; font-size: 12px; min-width: 82px; }
 .locked-repo-list a { color: #1d4ed8; text-decoration: none; font-size: 13px; font-weight: 750; }
 .locked-repo-list button { margin-left: auto; padding: 5px 8px; font-size: 11px; }
+.confirm-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: rgba(15, 23, 42, .48); }
+.confirm-dialog { width: min(520px, 100%); padding: 28px; background: #fff; border-radius: 20px; box-shadow: 0 24px 70px rgba(15, 23, 42, .24); }
+.confirm-dialog h2 { margin: 0 0 12px; font-size: 23px; }
+.confirm-dialog p { margin: 0; line-height: 1.7; color: #475569; }
+.confirm-dialog > div { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }

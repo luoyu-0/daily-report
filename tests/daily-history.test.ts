@@ -45,7 +45,7 @@ describe('本地日报复用', () => {
   it('仅成功渲染且入选的历史仓库被跳过；同日重跑保留已优化文案和证据', async () => {
     const historical = await buildCandidates('2026-10-10', [1, 2, 3, 4, 5].map((number) => profile(number)));
     const locked = historical.edition.candidates.find((item) => item.repo === 'owner/tool-1')!;
-    upsertCandidate({...locked, selected: true, confirmed: true});
+    for (const candidate of historical.edition.candidates) upsertCandidate({...candidate, selected: candidate.id === locked.id, confirmed: true});
     updateEditionStatus(historical.edition.id, 'rendered');
     const incoming = [profile(1, 1), ...[6, 7, 8, 9, 10].map((number, index) => profile(number, index + 2))];
     const first = await buildCandidates('2026-10-11', incoming);
@@ -73,7 +73,7 @@ describe('本地日报复用', () => {
   it('同日重跑只抓取尚未缓存的新仓库详情', async () => {
     const historical = await buildCandidates('2026-10-09', [20, 21, 22, 23, 24].map((number) => profile(number)));
     const locked = historical.edition.candidates.find((item) => item.repo === 'owner/tool-20')!;
-    upsertCandidate({...locked, selected: true, confirmed: true});
+    for (const candidate of historical.edition.candidates) upsertCandidate({...candidate, selected: candidate.id === locked.id, confirmed: true});
     updateEditionStatus(historical.edition.id, 'rendered');
     const {currentChinaDate} = await import('../src/shared/date.js');
     const today = currentChinaDate();
@@ -138,7 +138,7 @@ describe('本地日报复用', () => {
     const result = await buildCandidates('2026-10-13', [1, 2, 3, 4, 5].map((number) => profile(number)));
     expect(result.edition.candidates).toHaveLength(0);
     expect(result.skippedHistorical).toBe(5);
-    expect(result.warnings.join(' ')).toContain('少于批准成片所需');
+    expect(result.warnings.join(' ')).toContain('无法渲染成片');
   });
 
   it('当日可人工重置已渲染仓库锁定，其他仓库不受影响', async () => {
@@ -197,6 +197,30 @@ describe('本地日报复用', () => {
       const response = await app.inject({method: 'GET', url: '/api/repo-locks'});
       expect(response.statusCode).toBe(200);
       expect(response.json().repos).toContainEqual({date: '2026-10-06', repo: locked.repo});
+    } finally { await app.close(); }
+  });
+
+  it('新日报按榜单顺序默认入选前十个，同日重跑也保持该默认值', async () => {
+    const entries = Array.from({length: 15}, (_, index) => profile(index + 100, index + 1));
+    const first = await buildCandidates('2026-10-16', entries);
+    expect(first.edition.candidates.filter((item) => item.selected).map((item) => item.repo))
+      .toEqual(entries.slice(0, 10).map((item) => item.repo));
+    const second = await buildCandidates('2026-10-16', entries);
+    expect(second.edition.candidates.filter((item) => item.selected)).toHaveLength(10);
+  });
+
+  it('渲染 API 必须收到二次确认，拒绝后保持草稿且不创建任务', async () => {
+    const result = await buildCandidates('2026-10-17', [110, 111, 112].map((number) => profile(number)));
+    const {createApp} = await import('../src/server.js');
+    const app = await createApp(false);
+    try {
+      const response = await app.inject({method: 'POST', url: `/api/editions/${result.edition.id}/render`});
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toContain('二次确认');
+      const status = sqlite.prepare('SELECT status FROM editions WHERE id=?').get(result.edition.id) as {status: string};
+      expect(status.status).toBe('draft');
+      const jobs = sqlite.prepare('SELECT COUNT(*) AS count FROM render_jobs WHERE edition_id=?').get(result.edition.id) as {count: number};
+      expect(jobs.count).toBe(0);
     } finally { await app.close(); }
   });
 });

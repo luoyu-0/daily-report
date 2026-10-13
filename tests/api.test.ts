@@ -1,6 +1,6 @@
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import type {FastifyInstance} from 'fastify';
-import {createApp, validateApproval} from '../src/server.js';
+import {createApp, getOptimizationTargets, validateApproval} from '../src/server.js';
 import type {DiscoveryEdition, ToolCandidate} from '../src/shared/types.js';
 
 const tool = (index: number, confirmed = true): ToolCandidate => ({
@@ -36,10 +36,17 @@ describe('本地审核 API', () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it('只有 3～5 个逐条确认且资料完整的工具可以批准', () => {
-    expect(validateApproval(edition([tool(0), tool(1)]))).toContain('3～5');
-    expect(validateApproval(edition([tool(0), tool(1, false), tool(2)]))).toContain('逐条确认');
-    expect(validateApproval(edition([tool(0), tool(1), tool(2)]))).toBeUndefined();
+  it('允许一至十个资料完整的入选工具，确认由渲染动作完成', () => {
+    expect(validateApproval(edition([]))).toContain('1～10');
+    expect(validateApproval(edition(Array.from({length: 11}, (_, index) => tool(index))))).toContain('1～10');
+    expect(validateApproval(edition([tool(0, false)]))).toBeUndefined();
+    expect(validateApproval(edition(Array.from({length: 10}, (_, index) => tool(index, false))))).toBeUndefined();
+  });
+
+  it('一键优化涵盖未入选候选，但跳过已经 LLM 优化的候选', () => {
+    const candidates = [tool(0), {...tool(1), selected: false}, {...tool(2), generationMethod: 'llm' as const}];
+    expect(getOptimizationTargets(edition(candidates)).map((item) => item.repo))
+      .toEqual(['owner/tool-0', 'owner/tool-1']);
   });
 });
 

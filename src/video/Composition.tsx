@@ -1,9 +1,9 @@
 import React from 'react';
 import {AbsoluteFill, Audio, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
-import type {BrandConfig, DiscoveryEdition, VideoProps} from '../shared/types';
+import type {DiscoveryEdition, VideoProps} from '../shared/types';
 import {ToolCard} from '../ui/ToolCard';
 import {languageSummary} from '../shared/languages';
-import {buildTimeline} from './timeline';
+import {buildTimeline, totalDurationFrames} from './timeline';
 
 const base: React.CSSProperties = {fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif'};
 
@@ -31,24 +31,7 @@ function Radar({edition}: {edition: DiscoveryEdition}) {
     <header style={{display: 'flex', justifyContent: 'space-between', alignItems: 'end', borderBottom: `3px solid ${edition.brand.primary}`, paddingBottom: 22}}>
       <div><div style={{color: edition.brand.primary, fontWeight: 900, letterSpacing: 3}}>GITHUB · TODAY</div><h1 style={{fontSize: 62, margin: '10px 0 0'}}>今日GitHub热榜</h1></div><b style={{fontSize: 28}}>{edition.date}</b>
     </header>
-    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: 'repeat(5, 1fr)', gap: 15, marginTop: 24, height: 730}}>{top.map((tool) => <div key={tool.id} style={{display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center', padding: '18px 24px', background: '#fff', border: `1px solid ${edition.brand.paleBlue}`, borderRadius: 15, minWidth: 0}}><div style={{minWidth: 0}}><strong style={{fontSize: 23, overflowWrap: 'anywhere'}}>{tool.repo}</strong><div style={{fontSize: 17, color: '#64748b', marginTop: 8}}>{languageSummary(tool)}</div></div><span style={{fontSize: 19, fontWeight: 800, color: '#0369a1'}}>+{tool.starsToday ?? '—'} ★</span></div>)}</div>
-  </AbsoluteFill></Fade>;
-}
-
-function SectionPage({brand, count}: {brand: BrandConfig; count: number}) {
-  const frame = useCurrentFrame(); const x = interpolate(frame, [0, 15], [-110, 0], {extrapolateRight: 'clamp'});
-  return <Fade><AbsoluteFill style={{...base, background: brand.primary, color: '#fff', justifyContent: 'center', padding: 120}}>
-    <div style={{opacity: .14, position: 'absolute', right: 70, top: -130, fontSize: 470, fontWeight: 950}}>{count}</div>
-    <div style={{transform: `translateX(${x}px)`}}><div style={{fontSize: 25, letterSpacing: 8, opacity: .75, fontWeight: 900}}>TODAY'S PICKS</div><h1 style={{fontSize: 105, margin: '24px 0'}}>今日精选工具</h1><p style={{fontSize: 31, opacity: .86}}>从全球热榜中筛选 {count} 个值得进一步了解的项目</p></div>
-  </AbsoluteFill></Fade>;
-}
-
-function Summary({edition}: {edition: DiscoveryEdition}) {
-  const selected = edition.candidates.filter((item) => item.selected).sort((a, b) => a.position - b.position);
-  return <Fade><AbsoluteFill style={{...base, background: edition.brand.background, color: edition.brand.ink, padding: 90}}>
-    <div style={{color: edition.brand.primary, fontSize: 24, fontWeight: 900}}>{edition.brand.name}</div><h1 style={{fontSize: 68, margin: '14px 0 30px'}}>今天值得关注的工具</h1>
-    <div style={{display: 'grid', gap: 15}}>{selected.map((tool, index) => <div key={tool.id} style={{display: 'grid', gridTemplateColumns: '58px 1fr auto', gap: 20, alignItems: 'center', padding: '18px 24px', background: '#fff', borderRadius: 18, border: `1px solid ${edition.brand.paleBlue}`}}><b style={{color: edition.brand.primary}}>0{index + 1}</b><div><strong style={{fontSize: 25}}>{tool.repo}</strong><div style={{fontSize: 18, color: '#64748b', marginTop: 5}}>{tool.oneLinePitchZh}</div></div><span style={{padding: '7px 11px', borderRadius: 99, background: edition.brand.paleBlue, color: edition.brand.primary, fontWeight: 800}}>{tool.toolType}</span></div>)}</div>
-    <p style={{fontSize: 20, color: '#64748b', marginTop: 'auto'}}>排名来自 GitHub Trending Today；推荐基于仓库公开描述与 README，使用前请自行核验。</p>
+    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: `repeat(${Math.max(1, Math.ceil(top.length / 2))}, 1fr)`, gap: 15, marginTop: 24, height: Math.min(730, Math.ceil(top.length / 2) * 145)}}>{top.map((tool) => <div key={tool.id} style={{display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center', padding: '18px 24px', background: '#fff', border: `1px solid ${edition.brand.paleBlue}`, borderRadius: 15, minWidth: 0}}><div style={{minWidth: 0}}><strong style={{fontSize: 23, overflowWrap: 'anywhere'}}>{tool.repo}</strong><div style={{fontSize: 17, color: '#64748b', marginTop: 8}}>{languageSummary(tool)}</div></div><span style={{fontSize: 19, fontWeight: 800, color: '#0369a1'}}>+{tool.starsToday ?? '—'} ★</span></div>)}</div>
   </AbsoluteFill></Fade>;
 }
 
@@ -59,11 +42,9 @@ export function DailyReportVideo({edition, hasBgm}: VideoProps) {
     {timeline.map((segment, index) => {
       const content = segment.type === 'intro' ? <Intro edition={edition} />
         : segment.type === 'radar' ? <Radar edition={edition} />
-        : segment.type === 'section' ? <SectionPage brand={edition.brand} count={selected.length} />
-        : segment.type === 'tool' ? <Fade><ToolCard tool={selected[segment.toolIndex!]} brand={edition.brand} index={segment.toolIndex!} total={selected.length} /></Fade>
-        : <Summary edition={edition} />;
+        : <Fade><ToolCard tool={selected[segment.toolIndex!]} brand={edition.brand} index={segment.toolIndex!} total={selected.length} /></Fade>;
       return <Sequence key={`${segment.type}-${index}`} from={segment.from} durationInFrames={segment.durationInFrames}>{content}</Sequence>;
     })}
-    {hasBgm ? <Audio src={staticFile('assets/audio/bgm.mp3')} loop volume={0.12} /> : null}
+    {hasBgm ? <Audio src={staticFile('assets/audio/bgm.mp3')} loop volume={(frame) => interpolate(frame, [0, 15, Math.max(16, totalDurationFrames(edition) - 60), totalDurationFrames(edition)], [0, 0.12, 0.12, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})} /> : null}
   </AbsoluteFill>;
 }

@@ -16,31 +16,30 @@ const tool = (index: number): ToolCandidate => ({
 const edition: DiscoveryEdition = {
   id: 'e1', kind: 'github-tools', date: '2026-10-10', version: 1, status: 'approved',
   brand: {name: 'GitHub 工具雷达', tagline: '从今日热榜发现真正好用的工具', background: '#F4F8FF', primary: '#2563EB', ink: '#0F172A', paleBlue: '#DBEAFE', accent: '#38BDF8'},
-  candidates: Array.from({length: 4}, (_, index) => tool(index)),
+  candidates: Array.from({length: 10}, (_, index) => tool(index)),
   createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 };
 
 describe('视频时间轴', () => {
-  it('包含片头、热榜雷达、工具栏目和结尾', () => {
+  it('包含片头、热榜概览和十个工具，不再重复播放末尾清单', () => {
     const types = buildTimeline(edition).map((item) => item.type);
     expect(types[0]).toBe('intro');
-    expect(types).toContain('radar');
-    expect(types.filter((item) => item === 'section')).toHaveLength(1);
-    expect(types.filter((item) => item === 'tool')).toHaveLength(4);
-    expect(types.at(-1)).toBe('summary');
+    expect(types[1]).toBe('radar');
+    expect(types.filter((item) => item === 'tool')).toHaveLength(10);
+    expect(types.at(-1)).toBe('tool');
   });
 
-  it('默认四个精选工具的时长在 2～3 分钟内', () => {
+  it('默认十个工具的时长不超过三分钟', () => {
     const seconds = totalDurationFrames(edition) / VIDEO_FPS;
-    expect(seconds).toBeGreaterThanOrEqual(120);
+    expect(seconds).toBeGreaterThanOrEqual(130);
     expect(seconds).toBeLessThanOrEqual(180);
   });
 
-  it('允许的 3～5 个精选工具都保持在 2～3 分钟内', () => {
-    for (const count of [3, 5]) {
+  it('选择较少工具时缩短成片，时间轴仍以最后一条工具结束', () => {
+    for (const count of [1, 5]) {
       const seconds = totalDurationFrames({...edition, candidates: edition.candidates.slice(0, count)}) / VIDEO_FPS;
-      expect(seconds).toBeGreaterThanOrEqual(120);
-      expect(seconds).toBeLessThanOrEqual(180);
+      expect(seconds).toBeGreaterThan(18);
+      expect(seconds).toBeLessThan(totalDurationFrames(edition) / VIDEO_FPS);
     }
   });
 });

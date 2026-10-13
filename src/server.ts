@@ -28,14 +28,16 @@ const discoveryEdition = (id: string): DiscoveryEdition | undefined => {
 
 export function validateApproval(edition: DiscoveryEdition): string | undefined {
   const selected = edition.candidates.filter((item) => item.selected);
-  if (selected.length < 3 || selected.length > 5) return '每日精选必须选择 3～5 个工具';
-  if (selected.some((item) => !item.confirmed)) return '入选工具必须逐条确认';
+  if (selected.length < 1 || selected.length > 10) return '每期必须选择 1～10 个工具';
   if (selected.some((item) => !item.sources.length || !item.evidence.length)) return '入选工具缺少来源或证据';
   if (selected.some((item) => !item.oneLinePitchZh.trim() || !item.useCases.length || !item.targetUsers.length)) {
     return '入选工具必须填写推荐语、使用场景和适合人群';
   }
   return undefined;
 }
+
+export const getOptimizationTargets = (edition: DiscoveryEdition) =>
+  edition.candidates.filter((item) => item.generationMethod !== 'llm');
 
 export async function createApp(serveWeb = false) {
   const app = Fastify({logger: true, bodyLimit: 1_000_000});
@@ -69,8 +71,8 @@ export async function createApp(serveWeb = false) {
     const candidate = edition.candidates.find((item) => item.id === candidateId || item.repo === originalRepo);
     if (!candidate) return reply.code(404).send({error: '候选工具不存在'});
     const patch = editSchema.parse(request.body);
-    upsertCandidate({...candidate, ...patch, confirmed: patch.confirmed ?? false});
-    logEvent(edition.id, 'review', `更新工具：${candidate.repo}`, {candidateId: candidate.id, confirmed: patch.confirmed ?? false});
+    upsertCandidate({...candidate, ...patch, confirmed: patch.confirmed ?? candidate.confirmed});
+    logEvent(edition.id, 'review', `更新工具：${candidate.repo}`, {candidateId: candidate.id, selected: patch.selected ?? candidate.selected});
     return discoveryEdition(edition.id);
   });
   app.post('/api/editions/:id/reorder', async (request, reply) => {
@@ -99,13 +101,12 @@ export async function createApp(serveWeb = false) {
     logEvent(edition.id, 'enrichment', `重新提炼：${candidate.repo}`, {candidateId: candidate.id, method: enriched.method, cacheHit: enriched.cacheHit, warning: enriched.warning});
     return discoveryEdition(edition.id);
   });
-  app.post('/api/editions/:id/optimize-selected', async (request, reply) => {
+  app.post('/api/editions/:id/optimize-all', async (request, reply) => {
     const sourceEdition = discoveryEdition((request.params as {id: string}).id);
     if (!sourceEdition) return reply.code(404).send({error: '工具日报不存在'});
     if (!config.llm.apiKey || !config.llm.model) return reply.code(400).send({error: '尚未配置 LLM API key 或模型'});
     const edition = sourceEdition.status === 'draft' ? sourceEdition : forkEdition(sourceEdition.id);
-    const targets = edition.candidates.filter((item) => item.selected && item.generationMethod !== 'llm');
-    if (targets.length > 5) return reply.code(400).send({error: '单次最多优化 5 个工具'});
+    const targets = getOptimizationTargets(edition);
     if (!targets.length) return {edition, requested: 0, optimized: 0, fallback: 0, cacheHits: 0, inputChars: 0, warnings: []};
     const warnings: string[] = [];
     let optimized = 0; let fallback = 0; let cacheHits = 0; let inputChars = 0;
@@ -134,7 +135,15 @@ export async function createApp(serveWeb = false) {
   app.post('/api/editions/:id/render', async (request, reply) => {
     const edition = discoveryEdition((request.params as {id: string}).id);
     if (!edition) return reply.code(404).send({error: '工具日报不存在'});
-    if (edition.status !== 'approved') return reply.code(409).send({error: '只有已批准日报才能渲染'});
+    if (!z.object({confirm: z.literal(true)}).safeParse(request.body).success) return reply.code(400).send({error: '需要在二次确认后才能渲染成片'});
+    if (edition.status !== 'draft' && edition.status !== 'approved') return reply.code(409).send({error: '只有待审核或已批准日报才能渲染'});
+    const approvalError = validateApproval(edition);
+    if (approvalError) return reply.code(400).send({error: approvalError});
+    if (edition.status === 'draft') {
+      for (const candidate of edition.candidates.filter((item) => item.selected)) upsertCandidate({...candidate, confirmed: true});
+      updateEditionStatus(edition.id, 'approved');
+      logEvent(edition.id, 'approval', '用户二次确认并开始渲染', {selectedRepos: edition.candidates.filter((item) => item.selected).map((item) => item.repo)});
+    }
     const job = createRenderJob(edition.id);
     void renderEdition(edition.id, job).catch((error) => app.log.error(error));
     return reply.code(202).send(job);

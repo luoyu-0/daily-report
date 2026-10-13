@@ -7,6 +7,11 @@ const browser = await chromium.launch({headless: true});
 
 try {
   const page = await browser.newPage({viewport: {width: 1600, height: 1000}});
+  const edition = await (await page.request.get(`${address}/api/editions/latest`)).json();
+  edition.status = 'draft';
+  await page.route('**/api/editions/latest', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(edition),
+  }));
   await page.route('**/api/repo-locks', (route) => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({repos: [{date: '2026-10-11', repo: 'example/locked-tool'}]}),
   }));
@@ -27,6 +32,15 @@ try {
   if (pageText?.includes('README 快速开始') || pageText?.includes('注意事项（每行一项）')) throw new Error('审核台仍显示安装命令或注意事项编辑区');
   const firstCard = cards.first();
   if (await firstCard.getByRole('button', {name: '保存', exact: true}).count()) throw new Error('仍存在保存按钮');
+  if (await firstCard.getByRole('button', {name: '更新入选'}).count()) throw new Error('仍存在更新入选按钮');
+  const renderButton = page.getByRole('button', {name: '渲染成片'});
+  await renderButton.click();
+  const confirmation = page.getByRole('dialog', {name: '确认渲染成片'});
+  const confirmButton = confirmation.getByRole('button', {name: /秒后可确认|确认并渲染/});
+  if (!await confirmButton.isDisabled()) throw new Error('渲染确认弹窗未等待三秒');
+  await page.waitForTimeout(3200);
+  if (await confirmation.getByRole('button', {name: '确认并渲染'}).isDisabled()) throw new Error('三秒后仍不能确认渲染');
+  await confirmation.getByRole('button', {name: '返回审核'}).click();
   let regenerateRequests = 0;
   await page.route('**/api/editions/*/candidates/*/regenerate', async (route) => {
     regenerateRequests += 1;
@@ -42,17 +56,33 @@ try {
   await page.getByRole('progressbar', {name: /优化进度/}).waitFor();
   await page.waitForTimeout(750);
   if (regenerateRequests !== 1) throw new Error(`同一工具重复触发 LLM 请求 ${regenerateRequests} 次`);
-  let selectedPatch: unknown;
-  const edition = await (await page.request.get(`${address}/api/editions/latest`)).json();
+  const patches: Array<Record<string, unknown>> = [];
   await page.route('**/api/editions/*/candidates/*', async (route) => {
-    selectedPatch = route.request().postDataJSON();
+    const patch = route.request().postDataJSON() as Record<string, unknown>;
+    patches.push(patch);
+    const candidateId = route.request().url().split('/').at(-1);
+    edition.candidates = edition.candidates.map((item: {id: string}) => item.id === candidateId ? {...item, ...patch} : item);
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(edition)});
   });
   await Promise.all([
     page.waitForResponse((response) => response.request().method() === 'PATCH' && response.url().includes('/candidates/')),
-    firstCard.getByRole('button', {name: /^(入选|更新入选)$/}).click(),
+    firstCard.locator('.edit-pane input').fill('本地自动保存验证文案'),
   ]);
-  if ((selectedPatch as {selected?: boolean; confirmed?: boolean})?.selected !== true || (selectedPatch as {confirmed?: boolean})?.confirmed !== true) throw new Error('入选未同时保存并确认工具');
+  if (patches.at(-1)?.oneLinePitchZh !== '本地自动保存验证文案') throw new Error('编辑文案后未自动保存');
+  if (await firstCard.getByRole('button', {name: '取消入选'}).count()) {
+    await Promise.all([
+      page.waitForResponse((response) => response.request().method() === 'PATCH' && response.url().includes('/candidates/')),
+      firstCard.getByRole('button', {name: '取消入选'}).click(),
+    ]);
+  }
+  await Promise.all([
+    page.waitForResponse((response) => response.request().method() === 'PATCH' && response.url().includes('/candidates/')),
+    firstCard.getByRole('button', {name: '入选', exact: true}).click(),
+  ]);
+  await firstCard.getByRole('button', {name: '取消入选'}).waitFor();
+  const selectedPatch = patches.at(-1);
+  if (selectedPatch?.selected !== true || selectedPatch?.confirmed !== true) throw new Error('入选未同时保存并确认工具');
+  if (await firstCard.getByRole('button', {name: '入选', exact: true}).count()) throw new Error('已入选卡片仍显示入选按钮');
 
   const compatibilityPage = await browser.newPage({viewport: {width: 1200, height: 800}});
   await compatibilityPage.route('**/api/editions/latest', (route) => route.fulfill({
@@ -68,7 +98,7 @@ try {
   await compatibilityPage.goto(address, {waitUntil: 'networkidle'});
   await compatibilityPage.getByRole('button', {name: '创建今日工具雷达'}).click();
   await compatibilityPage.getByText(/审核服务版本不兼容/).waitFor({timeout: 2_000});
-  console.log(JSON.stringify({ok: true, cardCount, radarCount, preview: '品牌片头已渲染', duplicateLlmRequests: regenerateRequests, selectedPatch, staleApi: '已显示兼容错误'}, null, 2));
+  console.log(JSON.stringify({ok: true, cardCount, radarCount, preview: '品牌片头已渲染', duplicateLlmRequests: regenerateRequests, autosaved: true, delayedConfirmation: true, selectedPatch, staleApi: '已显示兼容错误'}, null, 2));
 } finally {
   await browser.close();
   await app.close();

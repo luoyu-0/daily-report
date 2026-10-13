@@ -17,8 +17,8 @@ export function ToolCard({tool, brand, index, total, style}: {
     <div style={{display: 'grid', gridTemplateColumns: '1.35fr .75fr', gap: 54, minHeight: 0}}>
       <section style={{display: 'flex', flexDirection: 'column', justifyContent: 'center'}}>
         <h1 style={{fontSize: 62, lineHeight: 1.15, margin: 0, overflowWrap: 'anywhere'}}>{tool.repo}</h1>
-        <p style={{fontSize: 31, lineHeight: 1.55, color: '#334155', margin: '28px 0'}}>{tool.oneLinePitchZh}</p>
-        <div style={{display: 'grid', gap: 12}}>{tool.useCases.slice(0, 3).map((item, i) => <div key={item} style={{fontSize: 23, display: 'flex', gap: 12}}><b style={{color: brand.primary}}>0{i + 1}</b><span>{item}</span></div>)}</div>
+        <p style={{fontSize: tool.oneLinePitchZh.length > 100 ? 27 : 31, lineHeight: 1.5, color: '#334155', margin: '24px 0'}}>{tool.oneLinePitchZh}</p>
+        <div style={{display: 'grid', gap: 12}}>{tool.useCases.slice(0, 2).map((item, i) => <div key={item} style={{fontSize: 23, display: 'flex', gap: 12}}><b style={{color: brand.primary}}>0{i + 1}</b><span>{item}</span></div>)}</div>
       </section>
       <aside style={{alignSelf: 'center', padding: 30, borderRadius: 26, background: '#fff', border: `1px solid ${brand.paleBlue}`, boxShadow: '0 20px 55px rgba(37,99,235,.10)'}}>
         <h2 style={{fontSize: 25, margin: '0 0 22px'}}>仓库速览</h2>

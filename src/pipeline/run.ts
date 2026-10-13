@@ -19,15 +19,6 @@ export async function mapWithConcurrency<T>(items: T[], concurrency: number, wor
   await Promise.all(workers);
 }
 
-export function chooseSuggestedTools(profiles: RepositoryProfile[], limit = 4): Set<string> {
-  return new Set(profiles
-    .map((profile) => ({repo: profile.repo, ...assessTool(profile)}))
-    .filter((item) => item.toolLikely)
-    .sort((a, b) => b.utilityScore - a.utilityScore)
-    .slice(0, limit)
-    .map((item) => item.repo));
-}
-
 export async function buildCandidates(date: string, providedProfiles?: RepositoryProfile[], onProgress?: (progress: DailyProgress) => void): Promise<DailyRunResult> {
   const history = getToolHistory(date);
   const warnings: string[] = [];
@@ -53,13 +44,11 @@ export async function buildCandidates(date: string, providedProfiles?: Repositor
     : await collectRepositoryProfiles(freshEntries, (completed, total) => onProgress?.({phase: 'profiles', completed, total}));
   warnings.push(...detailed.warnings);
   if (limited.length < config.github.candidateLimit) warnings.push(`Today 榜仅找到 ${limited.length} 个未被往期成片锁定的仓库，未达到目标 ${config.github.candidateLimit} 个`);
-  if (limited.length < 3) warnings.push(`今日仅有 ${limited.length} 个未收录的新仓库，少于批准成片所需的 3 个`);
+  if (limited.length === 0) warnings.push('今日没有可入选的仓库，无法渲染成片');
   const profiles = new Map(detailed.profiles.map((profile) => [profile.repo.toLowerCase(), profile]));
   const reusedToday = limited.length - freshEntries.length;
 
   const edition = createEdition(date);
-  const selectedCached = limited.filter((entry) => history.todayCandidates.get(entry.repo.toLowerCase())?.selected).length;
-  const suggested = chooseSuggestedTools(detailed.profiles, Math.max(0, 4 - selectedCached));
   logEvent(edition.id, 'collection', `今日可选仓库 ${limited.length} 条，往期成片锁定跳过 ${skippedHistorical} 条，同日复用 ${reusedToday} 条`, {warnings});
   onProgress?.({phase: 'rules', completed: 0, total: limited.length});
 
@@ -67,7 +56,8 @@ export async function buildCandidates(date: string, providedProfiles?: Repositor
     const cached = history.todayCandidates.get(entry.repo.toLowerCase());
     if (cached) {
       upsertCandidate({...cached, id: newId('tool'), editionId: edition.id, repo: entry.repo,
-        rank: entry.rank, rankingSource: entry.rankingSource, starsToday: entry.starsToday ?? cached.starsToday, position: index, confirmed: false});
+        rank: entry.rank, rankingSource: entry.rankingSource, starsToday: entry.starsToday ?? cached.starsToday,
+        selected: index < 10, position: index, confirmed: false});
       logEvent(edition.id, 'cache', `复用同日仓库：${entry.repo}`, {sourceEditionId: cached.editionId, method: cached.generationMethod});
       onProgress?.({phase: 'rules', completed: index + 1, total: limited.length, repo: entry.repo, method: cached.generationMethod});
       continue;
@@ -90,7 +80,7 @@ export async function buildCandidates(date: string, providedProfiles?: Repositor
       useCases: enriched.tool.useCases, targetUsers: enriched.tool.targetUsers, quickStart: enriched.tool.quickStart,
       prerequisites: enriched.tool.prerequisites, caveats: enriched.tool.caveats,
       utilityScore: assessment.utilityScore, toolLikely: assessment.toolLikely, excludeReason: assessment.excludeReason,
-      selected: suggested.has(profile.repo), confirmed: false, position: index,
+      selected: index < 10, confirmed: false, position: index,
       sources: [source], evidence: [`E1: ${profile.repo} — ${(content || profile.repo).slice(0, 800)}`],
       riskFlags: assessment.riskFlags, generationMethod: 'rule',
     };
