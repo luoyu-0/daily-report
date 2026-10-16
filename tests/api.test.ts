@@ -2,7 +2,7 @@ import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import type {FastifyInstance} from 'fastify';
 import {createApp, getOptimizationTargets, validateApproval} from '../src/server.js';
 import {REVIEW_API_VERSION} from '../src/shared/review-contract.js';
-import type {DiscoveryEdition, ToolCandidate} from '../src/shared/types.js';
+import {defaultVideoConfig, type DiscoveryEdition, type ToolCandidate} from '../src/shared/types.js';
 
 const tool = (index: number, confirmed = true): ToolCandidate => ({
   id: `tool-${index}`, editionId: 'edition-approval', repo: `owner/tool-${index}`, url: `https://github.com/owner/tool-${index}`,
@@ -15,7 +15,7 @@ const tool = (index: number, confirmed = true): ToolCandidate => ({
 });
 
 const edition = (candidates: ToolCandidate[]): DiscoveryEdition => ({
-  id: 'edition-approval', kind: 'github-tools', date: '2026-10-10', version: 1, status: 'draft', candidates,
+  id: 'edition-approval', kind: 'github-tools', date: '2026-10-10', version: 1, status: 'draft', candidates, videoConfig: defaultVideoConfig,
   brand: {name: 'GitHub 工具雷达', tagline: '每日工具', background: '#F4F8FF', primary: '#2563EB', ink: '#0F172A', paleBlue: '#DBEAFE', accent: '#38BDF8'},
   createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 });

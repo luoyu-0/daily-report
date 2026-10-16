@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import type {DiscoveryEdition, ToolCandidate} from '../src/shared/types.js';
+import {defaultVideoConfig, type DiscoveryEdition, type ToolCandidate} from '../src/shared/types.js';
 import {buildTimeline, totalDurationFrames, VIDEO_FPS} from '../src/video/timeline.js';
 
 const tool = (index: number): ToolCandidate => ({
@@ -15,6 +15,7 @@ const tool = (index: number): ToolCandidate => ({
 
 const edition: DiscoveryEdition = {
   id: 'e1', kind: 'github-tools', date: '2026-10-10', version: 1, status: 'approved',
+  videoConfig: defaultVideoConfig,
   brand: {name: 'GitHub 工具雷达', tagline: '从今日热榜发现真正好用的工具', background: '#F4F8FF', primary: '#2563EB', ink: '#0F172A', paleBlue: '#DBEAFE', accent: '#38BDF8'},
   candidates: Array.from({length: 10}, (_, index) => tool(index)),
   createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),

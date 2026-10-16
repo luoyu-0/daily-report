@@ -13,6 +13,11 @@ import {
   type ToolEnrichment,
   type RenderJob,
   renderJobSchema,
+  defaultVideoConfig,
+  videoConfigSchema,
+  type VideoConfig,
+  subtitleCueSchema,
+  type SubtitleCue,
 } from './shared/types.js';
 
 fs.mkdirSync(config.dataDir, {recursive: true});
@@ -31,6 +36,7 @@ sqlite.exec(`
     updated_at TEXT NOT NULL,
     approved_at TEXT,
     kind TEXT NOT NULL DEFAULT 'ai-news',
+    video_config_json TEXT,
     UNIQUE(date, version)
   );
   CREATE TABLE IF NOT EXISTS candidates (
@@ -59,6 +65,11 @@ sqlite.exec(`
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS subtitle_generation_cache (
+    cache_key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS repo_lock_resets (
     date TEXT NOT NULL,
     repo TEXT NOT NULL,
@@ -69,6 +80,9 @@ sqlite.exec(`
 const editionColumns = sqlite.prepare('PRAGMA table_info(editions)').all() as Array<{name: string}>;
 if (!editionColumns.some((column) => column.name === 'kind')) {
   sqlite.exec("ALTER TABLE editions ADD COLUMN kind TEXT NOT NULL DEFAULT 'ai-news'");
+}
+if (!editionColumns.some((column) => column.name === 'video_config_json')) {
+  sqlite.exec('ALTER TABLE editions ADD COLUMN video_config_json TEXT');
 }
 
 const now = () => new Date().toISOString();
@@ -97,6 +111,7 @@ function hydrateEdition(row: Record<string, unknown>): Edition {
     parentId: row.parent_id || undefined,
     status: row.status,
     brand: JSON.parse(row.brand_json as string),
+    ...(kind === 'github-tools' ? {videoConfig: row.video_config_json ? JSON.parse(row.video_config_json as string) : defaultVideoConfig} : {}),
     candidates,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -114,15 +129,16 @@ export function createEdition(date: string, candidates: ToolCandidate[] = []): D
     version: (latest.version ?? 0) + 1,
     status: 'draft',
     brand: config.brand,
+    videoConfig: defaultVideoConfig,
     candidates: [],
     createdAt: now(),
     updatedAt: now(),
   };
   const insert = sqlite.transaction(() => {
     sqlite.prepare(`INSERT INTO editions
-      (id,date,version,parent_id,status,brand_json,created_at,updated_at,approved_at,kind)
-      VALUES (@id,@date,@version,NULL,@status,@brand,@createdAt,@updatedAt,NULL,@kind)`)
-      .run({...edition, brand: JSON.stringify(edition.brand)});
+      (id,date,version,parent_id,status,brand_json,video_config_json,created_at,updated_at,approved_at,kind)
+      VALUES (@id,@date,@version,NULL,@status,@brand,@videoConfigJson,@createdAt,@updatedAt,NULL,@kind)`)
+      .run({...edition, brand: JSON.stringify(edition.brand), videoConfigJson: JSON.stringify(edition.videoConfig)});
     for (const candidate of candidates) upsertCandidate({...candidate, editionId: edition.id});
   });
   insert();
@@ -209,12 +225,19 @@ export function updateEditionStatus(id: string, status: Edition['status']): Edit
   return getEdition(id)!;
 }
 
+export function updateVideoConfig(id: string, videoConfig: VideoConfig): DiscoveryEdition {
+  sqlite.prepare('UPDATE editions SET video_config_json=?,updated_at=? WHERE id=?')
+    .run(JSON.stringify(videoConfigSchema.parse(videoConfig)), now(), id);
+  return getEdition(id)! as DiscoveryEdition;
+}
+
 export function forkEdition(sourceId: string): DiscoveryEdition {
   const source = getEdition(sourceId);
   if (!source) throw new Error('日报不存在');
   if (source.kind !== 'github-tools') throw new Error('旧版资讯日报不支持继续编辑');
   const fork = createEdition(source.date);
-  sqlite.prepare('UPDATE editions SET parent_id=? WHERE id=?').run(source.id, fork.id);
+  sqlite.prepare('UPDATE editions SET parent_id=?,video_config_json=? WHERE id=?')
+    .run(source.id, JSON.stringify(source.videoConfig), fork.id);
   for (const item of source.candidates) {
     upsertCandidate({...item, id: newId('tool'), editionId: fork.id, confirmed: false});
   }
@@ -248,6 +271,19 @@ export function saveToolEnrichmentCache(cacheKey: string, repo: string, payload:
   sqlite.prepare(`INSERT INTO tool_enrichment_cache (cache_key,repo,payload_json,created_at) VALUES (?,?,?,?)
     ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,created_at=excluded.created_at`)
     .run(cacheKey, repo, JSON.stringify(toolEnrichmentSchema.parse(payload)), now());
+}
+
+export function getSubtitleGenerationCache(cacheKey: string): SubtitleCue[] | undefined {
+  const row = sqlite.prepare('SELECT payload_json FROM subtitle_generation_cache WHERE cache_key=?').get(cacheKey) as {payload_json: string} | undefined;
+  if (!row) return undefined;
+  const parsed = subtitleCueSchema.array().safeParse(JSON.parse(row.payload_json));
+  return parsed.success ? parsed.data : undefined;
+}
+
+export function saveSubtitleGenerationCache(cacheKey: string, cues: SubtitleCue[]): void {
+  sqlite.prepare(`INSERT INTO subtitle_generation_cache (cache_key,payload_json,created_at) VALUES (?,?,?)
+    ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,created_at=excluded.created_at`)
+    .run(cacheKey, JSON.stringify(subtitleCueSchema.array().parse(cues)), now());
 }
 
 export function createRenderJob(editionId: string): RenderJob {

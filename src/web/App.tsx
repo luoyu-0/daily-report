@@ -1,20 +1,29 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Player} from '@remotion/player';
-import type {DiscoveryEdition, RenderJob, ToolCandidate, ToolType} from '../shared/types.js';
+import type {DiscoveryEdition, RenderJob, SubtitleCue, ToolCandidate, ToolType, VideoConfig} from '../shared/types.js';
 import {currentChinaDate} from '../shared/date.js';
 import {REVIEW_API_VERSION, REVIEW_APP_ID} from '../shared/review-contract.js';
 import {DailyReportVideo} from '../video/Composition.js';
 import {totalDurationFrames, VIDEO_FPS, VIDEO_HEIGHT, VIDEO_WIDTH} from '../video/timeline.js';
 import {api} from './api.js';
 import type {BgmStatus} from '../audio/bgm.js';
+import {parseLrc} from '../video/subtitles.js';
 import './tool-radar.css';
 
 type OptimizationResult = {edition: DiscoveryEdition; requested: number; optimized: number; fallback: number; cacheHits: number; inputChars: number; warnings: string[]};
+type TemplateOption = {id: string; name: string; description: string};
+type SubtitleGenerationResult = {subtitles: SubtitleCue[]; cacheHit: boolean; inputChars: number};
 type LockedRepo = {date: string; repo: string};
 type ReviewPage = 'overview' | 'candidates' | 'locks' | 'render';
 type ToolDraft = Pick<ToolCandidate, 'oneLinePitchZh' | 'toolType' | 'useCases' | 'targetUsers'>;
 const toolTypes: ToolType[] = ['CLI', '桌面应用', 'Web 工具', '开发工具', '自动化', 'Agent', '框架与库', '其他'];
 const lines = (value: string) => value.split('\n').map((item) => item.trim()).filter(Boolean);
+const subtitleLines = (cues: SubtitleCue[]) => cues.map((cue) => `${(cue.startMs / 1000).toFixed(3)} | ${(cue.endMs / 1000).toFixed(3)} | ${cue.text}`).join('\n');
+const parseSubtitleLines = (value: string): SubtitleCue[] => lines(value).map((line, index) => {
+  const match = line.match(/^(\d+(?:\.\d{1,3})?)\s*\|\s*(\d+(?:\.\d{1,3})?)\s*\|\s*(.+)$/);
+  if (!match) throw new Error(`第 ${index + 1} 行字幕格式无效，请使用「开始秒 | 结束秒 | 内容」`);
+  return {startMs: Math.round(Number(match[1]) * 1000), endMs: Math.round(Number(match[2]) * 1000), text: match[3].trim()};
+});
 const editableFields = (tool: ToolCandidate): ToolDraft => ({oneLinePitchZh: tool.oneLinePitchZh, toolType: tool.toolType, useCases: tool.useCases, targetUsers: tool.targetUsers});
 const sourceOverview = (tool: ToolCandidate) => {
   const content = tool.sources[0]?.content ?? '';
@@ -156,6 +165,9 @@ export function App() {
   const [job, setJob] = useState<RenderJob>(); const [cancelBusy, setCancelBusy] = useState(false); const [optimizing, setOptimizing] = useState(false); const [optimizingToolId, setOptimizingToolId] = useState<string>(); const optimizationLock = useRef(false); const [optimizationMessage, setOptimizationMessage] = useState('');
   const [showRenderConfirm, setShowRenderConfirm] = useState(false); const [renderBusy, setRenderBusy] = useState(false);
   const [bgm, setBgm] = useState<BgmStatus>({available: false, message: '正在检查 BGM…'}); const [bgmBusy, setBgmBusy] = useState(false);
+  const [templates, setTemplates] = useState<TemplateOption[]>([]); const [videoConfigBusy, setVideoConfigBusy] = useState(false); const [subtitleDraft, setSubtitleDraft] = useState('');
+  const [templateMenuOpen, setTemplateMenuOpen] = useState(false); const templatePickerRef = useRef<HTMLDivElement>(null);
+  const [subtitleGenerating, setSubtitleGenerating] = useState(false); const subtitleGenerationLock = useRef(false); const [subtitleMessage, setSubtitleMessage] = useState('');
   const editionRef = useRef<DiscoveryEdition | undefined>(undefined);
   const updateQueue = useRef<Promise<void>>(Promise.resolve());
   const editError = useRef<unknown>(undefined);
@@ -174,6 +186,15 @@ export function App() {
   };
   useEffect(() => { void loadLatest(); }, []);
   useEffect(() => { void api<BgmStatus>('/api/audio/bgm').then(setBgm).catch(() => setBgm({available: false, message: '暂时无法读取 BGM 状态'})); }, []);
+  useEffect(() => { void api<TemplateOption[]>('/api/video-templates').then(setTemplates).catch((reason) => setError(reason instanceof Error ? reason.message : String(reason))); }, []);
+  useEffect(() => { setSubtitleDraft(subtitleLines(edition?.videoConfig.subtitles ?? [])); }, [edition?.id]);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => { if (!templatePickerRef.current?.contains(event.target as Node)) setTemplateMenuOpen(false); };
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setTemplateMenuOpen(false); };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeEscape);
+    return () => { document.removeEventListener('pointerdown', closeOutside); document.removeEventListener('keydown', closeEscape); };
+  }, []);
   useEffect(() => {
     if (!job || ['completed', 'failed', 'canceled'].includes(job.status)) return;
     const timer = window.setInterval(async () => { try { const next = await api<RenderJob>(`/api/render-jobs/${job.id}`); setJob(next); if (['completed', 'failed', 'canceled'].includes(next.status)) void loadLatest(); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } }, 1500);
@@ -257,13 +278,55 @@ export function App() {
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBgmBusy(false); }
   };
+  const saveVideoConfig = async (videoConfig: VideoConfig) => {
+    setVideoConfigBusy(true); setError('');
+    try {
+      await updateQueue.current;
+      const current = editionRef.current;
+      if (!current) throw new Error('日报不存在');
+      const updated = parseEdition(await api<unknown>(`/api/editions/${current.id}/video-config`, {method: 'PUT', body: JSON.stringify(videoConfig)}));
+      applyEdition(updated); setSubtitleDraft(subtitleLines(updated.videoConfig.subtitles));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setVideoConfigBusy(false); }
+  };
+  const importLrc = async (file: File) => {
+    setError(''); setSubtitleMessage('');
+    try {
+      if (!file.name.toLowerCase().endsWith('.lrc')) throw new Error('请选择 .lrc 字幕文件');
+      if (file.size > 1024 * 1024) throw new Error('LRC 文件不能超过 1 MB');
+      if (subtitleDraft.trim() && !window.confirm('导入将替换当前字幕草稿，尚未保存的修改会丢失。是否继续？')) return;
+      const cues = parseLrc(await file.text(), totalDurationFrames(edition) * 1000 / VIDEO_FPS);
+      setSubtitleDraft(subtitleLines(cues));
+      setSubtitleMessage(`已导入 ${cues.length} 条字幕草稿；确认内容后点击“保存字幕”。`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  };
+  const generateSubtitles = async () => {
+    if (subtitleGenerationLock.current) return;
+    const current = editionRef.current;
+    if (!current) return;
+    const chosen = current.candidates.filter((item) => item.selected);
+    if (!chosen.length) { setError('请先入选仓库'); return; }
+    const estimate = chosen.reduce((sum, item) => sum + item.repo.length + item.oneLinePitchZh.length + item.useCases.slice(0, 2).join(' ').length, 0);
+    if (!window.confirm(`将调用一次 LLM，为 ${chosen.length} 个入选仓库生成视频字幕草稿，预计发送约 ${estimate} 个审核文案字符（不发送 README）。生成结果会替换当前编辑框内容，但不会自动保存。是否继续？`)) return;
+    subtitleGenerationLock.current = true; setSubtitleGenerating(true); setError(''); setSubtitleMessage('');
+    try {
+      await updateQueue.current;
+      const latest = editionRef.current;
+      if (!latest) throw new Error('日报不存在');
+      const result = await api<SubtitleGenerationResult>(`/api/editions/${latest.id}/subtitles/generate`, {method: 'POST'});
+      setSubtitleDraft(subtitleLines(result.subtitles));
+      setSubtitleMessage(`已生成 ${result.subtitles.length} 条字幕草稿${result.cacheHit ? '（使用本地缓存）' : `（本次发送 ${result.inputChars} 个字符）`}；请核对并保存。`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { subtitleGenerationLock.current = false; setSubtitleGenerating(false); }
+  };
   const deleteLock = async (date: string, repo: string) => {
     if (!window.confirm(`删除 ${date} 的 ${repo} 锁定记录？仓库将可再次进入候选；原视频和审核数据不会删除。`)) return;
     try { await api('/api/repo-locks/delete', {method: 'POST', body: JSON.stringify({date, repo})}); await loadLocks(); setError(''); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
   const pageTitles: Record<ReviewPage, string> = {overview: '概览', candidates: '仓库候选', locks: '锁定记录', render: '成片渲染'};
-  const renderDisabled = !['draft', 'approved'].includes(edition.status) || optimizing || Boolean(optimizingToolId)
+  const subtitleDirty = subtitleDraft !== subtitleLines(edition.videoConfig.subtitles);
+  const renderDisabled = !['draft', 'approved'].includes(edition.status) || optimizing || Boolean(optimizingToolId) || videoConfigBusy || subtitleGenerating || subtitleDirty
     || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status)) || selected.length < 1 || selected.length > 10;
   return <div className="review-shell">
     <header className="review-heading"><div className="brand"><span>GH</span> {edition.brand.name}</div><h1>审核台</h1></header>
@@ -275,6 +338,8 @@ export function App() {
         {activePage === 'locks' && <main className="locked-repos" aria-label="以往锁定仓库"><h2>已成片锁定仓库</h2>{lockedRepos.length === 0 ? <p>暂无锁定记录。只有入选并成功渲染成片的仓库才会出现在这里。</p> : <div className="locked-repo-list">{lockedRepos.map((item) => <div key={`${item.date}:${item.repo}`}><time>{item.date}</time><a href={`https://github.com/${item.repo}`} target="_blank" rel="noreferrer">{item.repo}</a><button className="danger" onClick={() => deleteLock(item.date, item.repo)}>删除锁定记录</button></div>)}</div>}</main>}
         {activePage === 'render' && <main className="render-page">
           <div className="render-actions"><p>将使用当前入选的 {selected.length} 个仓库。请先在“仓库候选”核对文案和来源。</p><button className="primary" onClick={() => { (document.activeElement as HTMLElement | null)?.blur(); setShowRenderConfirm(true); }} disabled={renderDisabled || bgmBusy}>渲染成片</button></div>
+          <div className="video-config-control"><div><strong>视频风格模板</strong><p>模板只负责画面编排；时间轴、字幕和 BGM 在各风格间共用。若字幕有未保存修改，请先保存。</p></div><div className="template-picker" ref={templatePickerRef}><button type="button" className="template-picker-trigger" aria-label="视频风格模板" aria-haspopup="listbox" aria-expanded={templateMenuOpen} disabled={videoConfigBusy || subtitleDirty || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))} onClick={() => setTemplateMenuOpen((open) => !open)}><span className="template-picker-mark">▦</span><span><b>{templates.find((template) => template.id === edition.videoConfig.templateId)?.name ?? '加载模板中…'}</b><small>{templates.find((template) => template.id === edition.videoConfig.templateId)?.description}</small></span><span className={`template-picker-chevron${templateMenuOpen ? ' open' : ''}`} aria-hidden="true"/></button>{templateMenuOpen && <div className="template-picker-menu" role="listbox" aria-label="可用视频风格">{templates.map((template) => <button key={template.id} type="button" role="option" aria-selected={template.id === edition.videoConfig.templateId} className={template.id === edition.videoConfig.templateId ? 'selected' : ''} onClick={() => { setTemplateMenuOpen(false); if (template.id !== edition.videoConfig.templateId) void saveVideoConfig({...edition.videoConfig, templateId: template.id}); }}><span className="template-picker-option-mark">{template.id === edition.videoConfig.templateId ? '✓' : '○'}</span><span><b>{template.name}</b><small>{template.description}</small></span></button>)}</div>}</div></div>
+          <div className="subtitle-control"><div><strong>字幕轨（可选）</strong><p>每行填写「开始秒 | 结束秒 | 内容」，例如「3 | 5.5 | 今天的工具推荐」。也可导入 .lrc 文件或用 LLM 生成草稿；修改后请先保存再渲染。</p></div><textarea aria-label="字幕轨" rows={3} placeholder="3 | 5.5 | 今天的工具推荐" value={subtitleDraft} onChange={(event) => { setSubtitleDraft(event.target.value); setSubtitleMessage(''); }} disabled={videoConfigBusy || subtitleGenerating || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))}/>{subtitleMessage && <p className="subtitle-message" role="status">{subtitleMessage}</p>}<div className="subtitle-actions"><label className="subtitle-import">导入 .lrc<input type="file" accept=".lrc,text/plain" disabled={videoConfigBusy || subtitleGenerating || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importLrc(file); event.target.value = ''; }}/></label><button type="button" onClick={() => { void generateSubtitles(); }} disabled={videoConfigBusy || subtitleGenerating || !selected.length || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))}>{subtitleGenerating ? 'LLM 生成中…' : 'LLM 生成'}</button><button className="primary" onClick={() => { try { void saveVideoConfig({...edition.videoConfig, subtitles: parseSubtitleLines(subtitleDraft)}); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } }} disabled={!subtitleDirty || videoConfigBusy || subtitleGenerating || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))}>{videoConfigBusy ? '保存中…' : '保存字幕'}</button></div></div>
           <div className="bgm-control"><div><strong>背景音乐</strong><p>{bgm.message}{bgm.available && bgm.durationSeconds ? ` · ${Math.round(bgm.durationSeconds)} 秒，成片中自动循环并淡入淡出` : ''}</p></div><div className="bgm-actions">{bgm.available && <button className="danger" onClick={() => { void clearBgm(); }} disabled={bgmBusy || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))}>取消选中</button>}<label className="bgm-upload">{bgmBusy ? '正在检查音频…' : bgm.available ? '更换 MP3' : '添加 MP3'}<input type="file" accept=".mp3,audio/mpeg" disabled={bgmBusy || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadBgm(file); event.target.value = ''; }}/></label></div></div>
           <section className="preview-panel"><div className="preview-head"><div><div className="eyebrow">REMOTION · PLAYER</div><strong>完整成片预览</strong></div><span>{Math.round(totalDurationFrames(edition) / VIDEO_FPS)} 秒</span></div><div className="video-frame"><Player component={DailyReportVideo} inputProps={{edition, hasBgm: bgm.available, bgmSrc: bgm.available ? `/api/audio/files/bgm.mp3?v=${bgm.version}` : undefined}} durationInFrames={totalDurationFrames(edition)} fps={VIDEO_FPS} compositionWidth={VIDEO_WIDTH} compositionHeight={VIDEO_HEIGHT} controls loop clickToPlay style={{width: '100%', aspectRatio: '16 / 9'}}/></div><div className="preview-note">预览与正式 MP4 使用相同时间轴。项目没有被自动安装或运行，推荐依据仅来自公开仓库资料。</div></section>
         </main>}

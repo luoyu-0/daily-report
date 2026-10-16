@@ -52,6 +52,18 @@ export const brandConfigSchema = z.object({
 });
 export type BrandConfig = z.infer<typeof brandConfigSchema>;
 
+export const subtitleCueSchema = z.object({
+  startMs: z.number().int().nonnegative(), endMs: z.number().int().positive(), text: z.string().trim().min(1).max(160),
+}).refine((cue) => cue.endMs > cue.startMs, '字幕结束时间必须晚于开始时间');
+export type SubtitleCue = z.infer<typeof subtitleCueSchema>;
+
+export const videoConfigSchema = z.object({
+  templateId: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  subtitles: z.array(subtitleCueSchema).max(100),
+});
+export type VideoConfig = z.infer<typeof videoConfigSchema>;
+export const defaultVideoConfig: VideoConfig = {templateId: 'blue-grid', subtitles: []};
+
 const editionBaseSchema = z.object({
   id: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), version: z.number().int().positive(),
   parentId: z.string().optional(), status: z.enum(['draft', 'approved', 'rendering', 'rendered', 'failed']),
@@ -59,7 +71,7 @@ const editionBaseSchema = z.object({
 });
 
 export const legacyEditionSchema = editionBaseSchema.extend({kind: z.literal('ai-news'), candidates: z.array(legacyCandidateStorySchema)});
-export const discoveryEditionSchema = editionBaseSchema.extend({kind: z.literal('github-tools'), candidates: z.array(toolCandidateSchema)});
+export const discoveryEditionSchema = editionBaseSchema.extend({kind: z.literal('github-tools'), candidates: z.array(toolCandidateSchema), videoConfig: videoConfigSchema.default(defaultVideoConfig)});
 export const editionSchema = z.discriminatedUnion('kind', [legacyEditionSchema, discoveryEditionSchema]);
 export type LegacyEdition = z.infer<typeof legacyEditionSchema>;
 export type DiscoveryEdition = z.infer<typeof discoveryEditionSchema>;

@@ -13,6 +13,7 @@ import type {DiscoveryEdition, RenderJob} from './shared/types.js';
 import {totalDurationFrames, VIDEO_FPS} from './video/timeline.js';
 import {getBgmStatus} from './audio/bgm.js';
 import {RenderCancellation} from './shared/render-cancellation.js';
+import {getVideoTemplate} from './video/templates/registry.js';
 
 const execFileAsync = promisify(execFile);
 const activeRenders = new RenderCancellation();
@@ -52,6 +53,7 @@ export async function renderEdition(editionId: string, job?: RenderJob): Promise
   const edition = getEdition(editionId);
   if (!edition) throw new Error('日报不存在');
   if (edition.kind !== 'github-tools') throw new Error('旧版资讯日报不支持使用新版工具视频模板渲染');
+  getVideoTemplate(edition.videoConfig.templateId);
   if (edition.status !== 'approved' && edition.status !== 'rendering') throw new Error('只有已批准日报才能渲染');
   const activeJob = job ?? {
     id: `render_${crypto.randomUUID()}`, editionId, status: 'queued' as const, progress: 0,
@@ -71,7 +73,7 @@ export async function renderEdition(editionId: string, job?: RenderJob): Promise
     checkCanceled();
     const hasBgm = bgm.available;
     updateEditionStatus(editionId, 'rendering');
-    logEvent(editionId, 'render', '开始渲染', {jobId: activeJob.id, hasBgm});
+    logEvent(editionId, 'render', '开始渲染', {jobId: activeJob.id, hasBgm, templateId: edition.videoConfig.templateId, subtitleCount: edition.videoConfig.subtitles.length});
     updateJob(activeJob, {status: 'running', progress: 2, logs: [...activeJob.logs, hasBgm ? '已加载本地 BGM' : bgm.message]});
     const serveUrl = await bundle({
       entryPoint: path.join(config.rootDir, 'src', 'video', 'Root.tsx'),
@@ -97,7 +99,7 @@ export async function renderEdition(editionId: string, job?: RenderJob): Promise
     checkCanceled();
     fs.renameSync(temporaryPath, outputPath);
     published = true;
-    fs.writeFileSync(sidecarPath, JSON.stringify({editionId, renderedAt: new Date().toISOString(), metadata, hasBgm}, null, 2));
+    fs.writeFileSync(sidecarPath, JSON.stringify({editionId, renderedAt: new Date().toISOString(), metadata, hasBgm, templateId: currentEdition.videoConfig.templateId, subtitleCount: currentEdition.videoConfig.subtitles.length}, null, 2));
     updateEditionStatus(editionId, 'rendered');
     relockRenderedRepos(currentEdition);
     logEvent(editionId, 'render', '渲染完成', {jobId: activeJob.id, outputPath, metadata});

@@ -7,16 +7,19 @@ import {z} from 'zod';
 import {config} from './config.js';
 import {
   createRenderJob, deleteRepoLock, forkEdition, getEdition, getEditionEvents, getLatestEdition, getLatestRenderJob, getLockedRepos, getRenderJob, getTodayLockedRepos, logEvent, resetTodayRepoLock, saveRenderJob,
-  updateEditionStatus, upsertCandidate,
+  updateEditionStatus, updateVideoConfig, upsertCandidate,
 } from './db.js';
 import {buildCandidates, mapWithConcurrency} from './pipeline/run.js';
 import {buildToolEvidence, enrichToolWithLlm} from './pipeline/llm.js';
-import {toolCandidateSchema, type DiscoveryEdition} from './shared/types.js';
+import {toolCandidateSchema, videoConfigSchema, type DiscoveryEdition} from './shared/types.js';
 import {REVIEW_API_VERSION, REVIEW_APP_ID} from './shared/review-contract.js';
 import {cancelRenderJob, renderEdition} from './render.js';
 import {currentChinaDate} from './shared/date.js';
 import {bgmPath, clearBgm, getBgmStatus, MAX_BGM_BYTES, saveBgm} from './audio/bgm.js';
 import type {ReviewLifecycle} from './shared/review-lifecycle.js';
+import {videoTemplates} from './video/templates/registry.js';
+import {totalDurationFrames, VIDEO_FPS} from './video/timeline.js';
+import {generateSubtitleDraft} from './video/subtitle-generation.js';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const editSchema = toolCandidateSchema.pick({
@@ -59,6 +62,7 @@ export async function createApp(serveWeb = false, launchRender = renderEdition, 
     });
   }
   app.get('/api/audio/bgm', getBgmStatus);
+  app.get('/api/video-templates', async () => videoTemplates.map(({id, name, description}) => ({id, name, description})));
   app.put('/api/audio/bgm', {bodyLimit: MAX_BGM_BYTES}, async (request, reply) => {
     if (!Buffer.isBuffer(request.body)) return reply.code(400).send({error: '请上传 MP3 文件'});
     try { return await saveBgm(request.body); }
@@ -67,6 +71,34 @@ export async function createApp(serveWeb = false, launchRender = renderEdition, 
   app.delete('/api/audio/bgm', clearBgm);
   app.get('/api/editions/latest', async (_, reply) => getLatestEdition() ?? reply.code(404).send({error: '暂无工具雷达日报'}));
   app.get('/api/editions/:id', async (request, reply) => getEdition((request.params as {id: string}).id) ?? reply.code(404).send({error: '日报不存在'}));
+  app.put('/api/editions/:id/video-config', async (request, reply) => {
+    const sourceEdition = discoveryEdition((request.params as {id: string}).id);
+    if (!sourceEdition) return reply.code(404).send({error: '工具日报不存在'});
+    if (sourceEdition.status === 'rendering') return reply.code(409).send({error: '渲染期间不能修改视频配置'});
+    const parsed = videoConfigSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({error: '视频配置格式无效'});
+    const videoConfig = parsed.data;
+    if (!videoTemplates.some((template) => template.id === videoConfig.templateId)) return reply.code(400).send({error: '视频模板未注册'});
+    const sorted = [...videoConfig.subtitles].sort((a, b) => a.startMs - b.startMs);
+    if (sorted.some((cue, index) => cue.endMs > totalDurationFrames(sourceEdition) * 1000 / VIDEO_FPS || (index > 0 && cue.startMs < sorted[index - 1].endMs))) {
+      return reply.code(400).send({error: '字幕时间超出成片或互相重叠'});
+    }
+    const edition = sourceEdition.status === 'draft' ? sourceEdition : forkEdition(sourceEdition.id);
+    const updated = updateVideoConfig(edition.id, {...videoConfig, subtitles: sorted});
+    logEvent(updated.id, 'review', '更新视频模板与字幕轨', {templateId: videoConfig.templateId, subtitleCount: sorted.length});
+    return updated;
+  });
+  app.post('/api/editions/:id/subtitles/generate', async (request, reply) => {
+    const edition = discoveryEdition((request.params as {id: string}).id);
+    if (!edition) return reply.code(404).send({error: '工具日报不存在'});
+    if (!config.llm.apiKey || !config.llm.model) return reply.code(400).send({error: '尚未配置 LLM API key 或模型'});
+    if (!edition.candidates.some((item) => item.selected)) return reply.code(400).send({error: '请先入选仓库'});
+    try {
+      const result = await generateSubtitleDraft(edition);
+      logEvent(edition.id, 'enrichment', '生成字幕草稿', {cacheHit: result.cacheHit, inputChars: result.inputChars, subtitleCount: result.subtitles.length});
+      return result;
+    } catch (error) { return reply.code(502).send({error: error instanceof Error ? error.message : String(error)}); }
+  });
   app.get('/api/editions/:id/events', async (request, reply) => {
     const id = (request.params as {id: string}).id;
     return getEdition(id) ? getEditionEvents(id) : reply.code(404).send({error: '日报不存在'});
