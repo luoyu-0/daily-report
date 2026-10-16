@@ -306,8 +306,8 @@ export function App() {
     if (!current) return;
     const chosen = current.candidates.filter((item) => item.selected);
     if (!chosen.length) { setError('请先入选仓库'); return; }
-    const estimate = chosen.reduce((sum, item) => sum + item.repo.length + item.oneLinePitchZh.length + item.useCases.slice(0, 2).join(' ').length, 0);
-    if (!window.confirm(`将调用一次 LLM，为 ${chosen.length} 个入选仓库生成视频字幕草稿，预计发送约 ${estimate} 个审核文案字符（不发送 README）。生成结果会替换当前编辑框内容，但不会自动保存。是否继续？`)) return;
+    const estimate = chosen.reduce((sum, item) => sum + item.repo.length + item.oneLinePitchZh.length + item.useCases.slice(0, 2).join(' ').length + Math.min(700, item.sources[0]?.content.length ?? 0), 0);
+    if (!window.confirm(`将调用 LLM，为 ${chosen.length} 个入选仓库生成简短字幕草稿，预计发送约 ${estimate} 个字符（包含每仓最多约 700 字符的本地 README 摘录，不发送完整 README）。格式不兼容或输出截断时可能重试，最多 3 次请求；结果会替换当前编辑框内容，但不会自动保存。是否继续？`)) return;
     subtitleGenerationLock.current = true; setSubtitleGenerating(true); setError(''); setSubtitleMessage('');
     try {
       await updateQueue.current;

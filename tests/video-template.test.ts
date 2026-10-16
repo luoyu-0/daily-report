@@ -57,34 +57,104 @@ describe('视频模板与字幕轨', () => {
     expect(parseLrc('[00:02.00]独立一句', 100_000)[0].endMs).toBe(8000);
   });
 
-  it('LLM 只用已审核的精简文案生成字幕草稿，重复请求命中本地缓存', async () => {
+  it('LLM 从精简 README 提炼仓库短字幕，非仓库画面留白并复用缓存', async () => {
     const edition = db.createEdition('2026-10-22');
     const tool: ToolCandidate = {
       id: 'subtitle-tool', editionId: edition.id, repo: 'owner/demo-tool', url: 'https://github.com/owner/demo-tool',
       rank: 1, topics: [], archived: false, toolType: '开发工具', oneLinePitchZh: '帮助开发者整理代码结构',
       useCases: ['梳理代码依赖'], targetUsers: ['开发者'], prerequisites: [], caveats: [], utilityScore: 80, toolLikely: true,
       selected: true, confirmed: true, position: 0, generationMethod: 'rule', riskFlags: [],
-      sources: [{id: 'subtitle-source', sourceName: 'GitHub', title: 'owner/demo-tool', url: 'https://github.com/owner/demo-tool', content: 'README：不应发给字幕模型', fetchedAt: new Date().toISOString(), primarySource: true}],
+      sources: [{id: 'subtitle-source', sourceName: 'GitHub', title: 'owner/demo-tool', url: 'https://github.com/owner/demo-tool', content: '项目描述：代码结构工具\nREADME：\n## Features\n支持离线梳理模块关系。\n## Installation\n运行安装命令。', fetchedAt: new Date().toISOString(), primarySource: true}],
       evidence: ['E1: 已审核文案'],
     };
     db.upsertCandidate(tool);
     const latest = db.getEdition(edition.id);
     if (latest?.kind !== 'github-tools') throw new Error('测试日报不存在');
-    const fetchMock = vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({captions: ['发现实用工具', '今日热榜概览', '帮助开发者整理代码结构', '继续发现好工具']})}}]})});
+    const fetchMock = vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({toolCaptions: [['离线梳理模块', '看清依赖脉络']]})}}]})});
     vi.stubGlobal('fetch', fetchMock);
     const memory = new Map<string, ReturnType<typeof parseLrc>>();
     const cache = {get: (key: string) => memory.get(key), set: (key: string, cues: ReturnType<typeof parseLrc>) => { memory.set(key, cues); }};
     const settings = {baseUrl: 'https://llm.example/v1', apiKey: 'test-key', model: 'test-model', timeoutMs: 1000};
     const first = await generateSubtitleDraft(latest, settings, cache);
-    expect(first.subtitles).toHaveLength(4);
-    expect(first.subtitles[2].startMs).toBe(18_300);
+    expect(first.subtitles.map((cue) => cue.text)).toEqual(['离线梳理模块', '看清依赖脉络']);
+    expect(first.subtitles[0].startMs).toBeGreaterThan(18_000);
+    expect(first.subtitles[1].endMs).toBeLessThan(26_000);
+    expect(first.subtitles[1].startMs).toBeGreaterThan(first.subtitles[0].endMs);
     expect(first.cacheHit).toBe(false);
     const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(requestBody.messages[1].content).not.toContain('不应发给字幕模型');
+    expect(requestBody.messages[1].content).toContain('离线梳理模块关系');
+    expect(requestBody.messages[1].content).not.toContain('运行安装命令');
     expect((await generateSubtitleDraft(latest, settings, cache)).cacheHit).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({captions: ['发现实用工具', '热榜概览', '新增 999 项功能', '继续发现']})}}]})}));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({toolCaptions: [['新增999项功能']]})}}]})}));
     await expect(generateSubtitleDraft(latest, {...settings, model: 'test-model-v2'}, cache)).rejects.toThrow('不存在的数字');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({toolCaptions: [['这一句字幕明显超过十个汉字']]})}}]})}));
+    await expect(generateSubtitleDraft(latest, {...settings, model: 'too-long-model'}, cache)).rejects.toThrow('过长');
+
+    const four = ['离线整理模块', '识别依赖关系', '观察结构变化', '聚焦关键节点'];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({toolCaptions: [four]})}}]})}));
+    const fourCues = await generateSubtitleDraft(latest, {...settings, model: 'four-cues-model'}, cache);
+    expect(fourCues.subtitles).toHaveLength(4);
+    expect(fourCues.subtitles[0].startMs).toBeGreaterThan(18_000);
+    expect(fourCues.subtitles[3].endMs).toBeLessThan(26_000);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({toolCaptions: [['先看是否适配']]})}}]})}));
+    const oneCue = await generateSubtitleDraft(latest, {...settings, model: 'one-cue-model'}, cache);
+    expect(oneCue.subtitles).toHaveLength(1);
+    expect(oneCue.subtitles[0].startMs).toBeGreaterThan(20_000);
+    expect(oneCue.subtitles[0].endMs).toBeLessThan(24_000);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({toolCaptions: [[...four, '最后一条']]})}}]})}));
+    await expect(generateSubtitleDraft(latest, {...settings, model: 'five-cues-model'}, cache)).rejects.toThrow('返回结构不符合要求');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{message: {content: JSON.stringify({toolCaptions: [['梳理代码依赖']]})}}]})}));
+    await expect(generateSubtitleDraft(latest, {...settings, model: 'repeated-cue-model'}, cache)).rejects.toThrow('重复画面');
+  });
+
+  it('字幕模型输出被截断时重试并要求符合结构化字幕格式', async () => {
+    const edition = db.createEdition('2026-10-23');
+    db.upsertCandidate({
+      id: 'truncated-subtitle-tool', editionId: edition.id, repo: 'owner/demo', url: 'https://github.com/owner/demo',
+      rank: 1, topics: [], archived: false, toolType: '开发工具', oneLinePitchZh: '帮助开发者整理代码结构',
+      useCases: ['梳理代码依赖'], targetUsers: ['开发者'], prerequisites: [], caveats: [], utilityScore: 80, toolLikely: true,
+      selected: true, confirmed: true, position: 0, generationMethod: 'rule', riskFlags: [],
+      sources: [{id: 'truncated-source', sourceName: 'GitHub', title: 'owner/demo', url: 'https://github.com/owner/demo', content: '工具说明', fetchedAt: new Date().toISOString(), primarySource: true}],
+      evidence: ['E1: 工具说明'],
+    });
+    const latest = db.getEdition(edition.id);
+    if (latest?.kind !== 'github-tools') throw new Error('测试日报不存在');
+    const toolCaptions = [['先看依赖全貌', '再找结构瓶颈']];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ok: true, json: async () => ({choices: [{finish_reason: 'length', message: {content: '{"toolCaptions":[["先看依赖全貌"'}}]})})
+      .mockResolvedValueOnce({ok: true, json: async () => ({choices: [{finish_reason: 'stop', message: {content: JSON.stringify({toolCaptions})}}]})});
+    vi.stubGlobal('fetch', fetchMock);
+    const cache = {get: () => undefined, set: vi.fn()};
+    const result = await generateSubtitleDraft(latest, {baseUrl: 'https://llm.example/v1', apiKey: 'test-key', model: 'test-model', timeoutMs: 1000}, cache);
+    expect(result.subtitles.map((cue) => cue.text)).toEqual(toolCaptions[0]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.response_format).toMatchObject({type: 'json_schema', json_schema: {strict: true}});
+    expect(request.max_tokens).toBeGreaterThan(500);
+    expect(request.response_format.json_schema.schema).toMatchObject({
+      required: ['toolCaptions'], additionalProperties: false,
+      properties: {toolCaptions: {type: 'array', items: {type: 'array', items: {type: 'string'}}}},
+    });
+    const retry = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(retry.max_tokens).toBeGreaterThan(request.max_tokens);
+
+    const fallbackMock = vi.fn()
+      .mockResolvedValueOnce({ok: false, status: 400, text: async () => 'response_format json_schema is not supported'})
+      .mockResolvedValueOnce({ok: true, json: async () => ({choices: [{finish_reason: 'stop', message: {content: JSON.stringify({toolCaptions})}}]})});
+    vi.stubGlobal('fetch', fallbackMock);
+    expect((await generateSubtitleDraft(latest, {baseUrl: 'https://llm.example/v1', apiKey: 'test-key', model: 'fallback-model', timeoutMs: 1000}, cache)).subtitles).toHaveLength(2);
+    expect(JSON.parse(fallbackMock.mock.calls[1][1].body).response_format).toEqual({type: 'json_object'});
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{finish_reason: 'length', message: {content: ''}}]})}));
+    await expect(generateSubtitleDraft(latest, {baseUrl: 'https://llm.example/v1', apiKey: 'test-key', model: 'empty-model', timeoutMs: 1000}, cache)).rejects.toThrow('输出被截断或为空');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok: true, json: async () => ({choices: [{finish_reason: 'stop', message: {content: '{"toolCaptions":[["正常",42]]}'}}]})}));
+    await expect(generateSubtitleDraft(latest, {baseUrl: 'https://llm.example/v1', apiKey: 'test-key', model: 'invalid-shape-model', timeoutMs: 1000}, cache)).rejects.toThrow('返回结构不符合要求');
   });
 
   it('切换模板和字幕后持久化；已批准日报修改时创建新版本', async () => {
