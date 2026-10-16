@@ -4,11 +4,12 @@
   "description": "GitHub 工具雷达本地发现、审核与视频生成工作流",
   "private": true,
   "scripts": {
-    "daily": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --import tsx src/cli/daily.ts",
+    "dev": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --import tsx src/cli/daily.ts",
     "review": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --import tsx src/cli/review.ts",
     "render": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --import tsx src/cli/render.ts",
     "doctor": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --import tsx src/cli/doctor.ts",
     "smoke:render": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --import tsx scripts/smoke-render.ts",
+    "smoke:bgm": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --import tsx scripts/smoke-bgm.ts",
     "smoke:review": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --import tsx scripts/smoke-review.ts",
     "dev:api": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --use-env-proxy --watch --import tsx src/server.ts",
     "dev:web": "vite",

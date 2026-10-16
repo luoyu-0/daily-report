@@ -1,6 +1,16 @@
 import {chromium} from 'playwright';
+import fs from 'node:fs';
+import path from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import ffmpegPath from 'ffmpeg-static';
+import {config} from '../src/config.js';
 import {createApp} from '../src/server.js';
 
+const originalPublicDir = config.publicDir;
+const temporaryPublicDir = path.join(config.rootDir, 'data', `review-audio-${randomUUID()}`);
+config.publicDir = temporaryPublicDir;
+fs.mkdirSync(path.join(temporaryPublicDir, 'assets', 'audio'), {recursive: true});
 const app = await createApp(true);
 const address = await app.listen({host: '127.0.0.1', port: 0});
 const browser = await chromium.launch({headless: true});
@@ -58,6 +68,10 @@ try {
   if (await navigator.getByRole('button', {name: '展开仓库导航'}).getAttribute('aria-expanded') !== 'false') throw new Error('点击导航栏外部后未收起');
   await page.setViewportSize({width: 1600, height: 1000});
   await page.getByRole('navigation', {name: '审核台导航'}).getByRole('button', {name: '成片渲染'}).click();
+  const testAudio = execFileSync(ffmpegPath!, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-c:a', 'libmp3lame', '-f', 'mp3', 'pipe:1']);
+  await page.locator('.bgm-upload input').setInputFiles({name: 'bgm.mp3', mimeType: 'audio/mpeg', buffer: testAudio});
+  await page.getByText('本地 BGM 已就绪', {exact: false}).waitFor();
+  await page.locator('audio[src*="/api/audio/files/bgm.mp3"]').waitFor({state: 'attached'});
   const previewText = await page.locator('.preview-panel').textContent();
   const videoText = await page.locator('.video-frame').textContent();
   if (!previewText?.includes('完整成片预览')) throw new Error('未找到 Remotion 预览区域');
@@ -143,4 +157,8 @@ try {
 } finally {
   await browser.close();
   await app.close();
+  config.publicDir = originalPublicDir;
+  if (path.dirname(temporaryPublicDir) === path.join(config.rootDir, 'data') && path.basename(temporaryPublicDir).startsWith('review-audio-')) {
+    fs.rmSync(temporaryPublicDir, {recursive: true, force: true});
+  }
 }

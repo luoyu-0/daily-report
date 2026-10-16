@@ -23,7 +23,7 @@
 ### GitHub 账户配置与隐私
 
 1. 在 GitHub 的[个人访问令牌设置页](https://github.com/settings/personal-access-tokens/new)创建 **fine-grained personal access token**，设置到期时间，仓库权限仅授予公开仓库读取所需的最小范围；读取 README 所需权限为 **Contents: Read-only**。不要授予写入权限，也不要在项目中填写 GitHub 密码。
-2. 在本机的 `.env.local` 填入 `GITHUB_TOKEN=你的令牌`，不要把令牌粘贴到聊天、截图或提交记录里。运行 `npm run doctor`，看到“GitHub API 身份验证：令牌已生效”及剩余额度后，再运行 `npm run daily`。修改令牌后，已运行的审核服务需重启才会读取新配置。
+2. 在本机的 `.env.local` 填入 `GITHUB_TOKEN=你的令牌`，不要把令牌粘贴到聊天、截图或提交记录里。运行 `npm run doctor`，看到“GitHub API 身份验证：令牌已生效”及剩余额度后，再运行 `npm run dev`。修改令牌后，已运行的审核服务需重启才会读取新配置。
 
 令牌只由本地 Node.js 进程读取，并通过 HTTPS 作为请求头发送给 **GitHub 官方 `api.github.com`**，用于仓库元数据与 README 请求；不会作为日报内容、LLM 提示词、浏览器响应或日志保存/发送。`.env.local` 已被 Git 忽略。这里的“不会上传隐私信息”不包括认证所必需的令牌发送给 GitHub 本身；设备上的其他程序、备份或误分享文件仍可能造成泄露，请妥善保管并定期轮换令牌。[GitHub 速率限制说明](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)、[令牌权限说明](https://docs.github.com/en/rest/repos/contents)。
 
@@ -33,16 +33,16 @@
    npm run doctor
    ```
 
-3. 采集北京时间当天榜单并打开审核台：
+3. 在当前终端采集北京时间当天榜单并打开审核台：
 
    ```powershell
-   npm run daily
+   npm run dev
 
-   # 只采集，不启动审核台
-   npm run daily -- --no-review
+   # 只采集，不启动审核台（供计划任务使用）
+   npm run dev -- --no-review
    ```
 
-   `daily` 不调用 LLM，完成后会退出并归还终端。同日重跑会保留已优化文案，但新日报会重新默认入选前 10 项；已存在的日报和人工修改不会被覆盖。若历史过滤后没有可选仓库，会提示无法渲染。`--date YYYY-MM-DD` 主要用于可重复测试；GitHub 官方 Trending 只提供实时 Today 榜，指定日期不是当前北京时间时会失败，不会自动沿用历史榜单。
+   `dev` 在同一个终端中采集并运行审核服务，不另开服务终端；关闭最后一个审核台页面后服务自动退出。旧版后台审核服务若仍占用端口，需先关闭一次。采集不调用 LLM。同日重跑会保留已优化文案，但新日报会重新默认入选前 10 项；已存在的日报和人工修改不会被覆盖。若历史过滤后没有可选仓库，会提示无法渲染。`--date YYYY-MM-DD` 主要用于可重复测试；GitHub 官方 Trending 只提供实时 Today 榜，指定日期不是当前北京时间时会失败，不会自动沿用历史榜单。
 
 4. 单独启动审核台：
 
@@ -50,7 +50,7 @@
    npm run review
    ```
 
-   审核台地址为 `http://127.0.0.1:5173`。左侧导航分为“概览”“仓库候选”“锁定记录”“成片渲染”；概览页展示今日可选仓库，仓库候选页可筛选、入选或取消入选并自动保存编辑，成片渲染页可预览完整视频时间轴。
+   审核台地址为 `http://127.0.0.1:5173`。左侧导航分为“概览”“仓库候选”“锁定记录”“成片渲染”；概览页展示今日可选仓库，仓库候选页可筛选、入选或取消入选并自动保存编辑，成片渲染页可预览完整视频时间轴。关闭最后一个审核台页面后，后台审核服务会在短暂宽限期后自动退出；浏览器异常退出时会按心跳超时退出。关闭页面时若仍在渲染，会先取消任务并清理临时成片，再停止服务。
 
 5. 审核台可对单个候选调用 LLM，也可通过“LLM一键优化”处理所有尚未优化的候选（包含未入选项）；调用前会显示数量和预计证据字符数并要求确认。系统从 README 中优先抽取 Overview、Features、Use cases 等核心章节，并跳过 Installation、Quick Start 等安装内容，每个工具最多发送 `LLM_EVIDENCE_MAX_CHARS` 个证据字符。模型失败或生成无证据内容时，自动保留规则版。
 
@@ -61,6 +61,7 @@
    ```
 
 成片保存到 `output/`，并附带编码检查 JSON。
+渲染进行中可点击“取消渲染”；取消后日报保持可重新渲染状态，本次半成品 MP4 会被清理。
 视频时间轴为 3 秒片头、15 秒仓库总览、每个入选仓库 8 秒、4 秒品牌片尾；默认入选 10 项时约 102 秒。
 
 ## 数据来源与失败策略
@@ -91,12 +92,14 @@
 
 ## 背景音乐与 TTS
 
-- 把已授权音乐放到 `public/assets/audio/bgm.mp3`，不存在时静音导出。
+- 在“成片渲染”页选择已获授权的 MP3，即可保存为项目内的 `public/assets/audio/bgm.mp3`；也可以手动把文件放到该路径。上限 20 MB，上传前会检查文件是否可解码。已选中时可点击“取消选中”，移除项目内的副本并切换为静音；原始 MP3 不会被删除。
+- 审核台预览会播放同一首 BGM；正式成片会以较低音量循环播放，并在开头和结尾淡入淡出。导出后会检查 MP4 中的 AAC 音轨。文件缺失或损坏时会显示提示并静音导出。
+- BGM 文件只保存在本地，已被 Git 忽略；`npm run smoke:bgm` 可用合成测试音频验证完整渲染链路。
 - 当前不生成 TTS；数据结构保留 `narrationAudio` 和 `audioDurationMs`，便于后续接入本地 TTS。
 
 ## 自动调度与开发检查
 
-`scripts/run-daily.ps1` 可由 Windows Task Scheduler 调用，本项目不会自动创建系统计划任务。
+`scripts/run-daily.ps1` 可由 Windows Task Scheduler 调用，脚本使用 `npm run dev -- --no-review` 只采集、不启动审核台；本项目不会自动创建系统计划任务。
 
 ```powershell
 npm test

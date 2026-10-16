@@ -233,6 +233,11 @@ export function getRenderJob(id: string): RenderJob | undefined {
   return row ? renderJobSchema.parse(JSON.parse(row.payload_json)) : undefined;
 }
 
+export function getLatestRenderJob(editionId: string): RenderJob | undefined {
+  const row = sqlite.prepare('SELECT payload_json FROM render_jobs WHERE edition_id=? ORDER BY rowid DESC LIMIT 1').get(editionId) as {payload_json: string} | undefined;
+  return row ? renderJobSchema.parse(JSON.parse(row.payload_json)) : undefined;
+}
+
 export function getToolEnrichmentCache(cacheKey: string): ToolEnrichment | undefined {
   const row = sqlite.prepare('SELECT payload_json FROM tool_enrichment_cache WHERE cache_key=?').get(cacheKey) as {payload_json: string} | undefined;
   if (!row) return undefined;

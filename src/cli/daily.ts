@@ -1,6 +1,5 @@
 import {buildCandidates, type DailyProgress} from '../pipeline/run.js';
 import {currentChinaDate} from '../shared/date.js';
-import {launchReviewInBackground} from '../shared/review-launcher.js';
 
 const arg = (name: string) => {
   const index = process.argv.indexOf(name);
@@ -23,7 +22,10 @@ const showProgress = ({phase, completed, total}: DailyProgress) => {
   }
   previousPhase = phase;
 };
-let collectionError = '';
+const openReview = async (startupError?: string) => {
+  const {startReview} = await import('./review.js');
+  await startReview(startupError);
+};
 try {
   const result = await buildCandidates(date, undefined, showProgress);
   console.log(`已创建 ${result.edition.id}，今日可选仓库 ${result.edition.candidates.length} 条；成片锁定跳过 ${result.skippedHistorical} 条，同日复用 ${result.reusedToday} 条。`);
@@ -32,11 +34,9 @@ try {
   if (process.argv.includes('--no-review')) {
     console.log('采集完成；已按 --no-review 跳过审核台启动。');
   } else {
-    console.log('采集完成，正在后台启动本地审核台…');
+    console.log('采集完成，正在当前终端启动本地审核台…关闭审核台页面后服务将自动退出。');
     try {
-      const review = await launchReviewInBackground();
-      console.log(`审核台已${review.started ? '启动' : '在运行'}：${review.url}`);
-      console.log('daily 命令已结束，可以继续使用当前终端。');
+      await openReview();
     } catch (error) {
       console.error(`候选已保存，但审核台启动失败：${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 1;
@@ -44,14 +44,13 @@ try {
   }
 } catch (error) {
   if (process.stdout.isTTY) process.stdout.write('\n');
-  collectionError = error instanceof Error ? error.message : String(error);
+  const collectionError = error instanceof Error ? error.message : String(error);
   console.error(`工具雷达创建失败：${collectionError}`);
   process.exitCode = 1;
   if (!process.argv.includes('--no-review')) {
     console.log('正在打开审核台显示失败原因…');
     try {
-      const review = await launchReviewInBackground(collectionError);
-      console.log(`审核台已${review.started ? '启动' : '在运行'}：${review.url}`);
+      await openReview(collectionError);
     } catch (launchError) {
       console.error(`审核台启动失败：${launchError instanceof Error ? launchError.message : String(launchError)}`);
     }

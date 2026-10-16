@@ -6,6 +6,7 @@ import {REVIEW_API_VERSION, REVIEW_APP_ID} from '../shared/review-contract.js';
 import {DailyReportVideo} from '../video/Composition.js';
 import {totalDurationFrames, VIDEO_FPS, VIDEO_HEIGHT, VIDEO_WIDTH} from '../video/timeline.js';
 import {api} from './api.js';
+import type {BgmStatus} from '../audio/bgm.js';
 import './tool-radar.css';
 
 type OptimizationResult = {edition: DiscoveryEdition; requested: number; optimized: number; fallback: number; cacheHits: number; inputChars: number; warnings: string[]};
@@ -24,7 +25,7 @@ const parseEdition = (value: unknown): DiscoveryEdition => {
   const candidate = value as Partial<DiscoveryEdition> | null;
   const valid = candidate?.kind === 'github-tools' && typeof candidate.id === 'string' && Array.isArray(candidate.candidates)
     && candidate.candidates.every((item) => typeof item?.repo === 'string' && typeof item?.rank === 'number' && Array.isArray(item?.sources));
-  if (!valid) throw new Error('审核服务版本不兼容。请关闭旧审核台后重新运行 npm run daily。');
+  if (!valid) throw new Error('审核服务版本不兼容。请关闭旧审核台后重新运行 npm run dev。');
   return candidate as DiscoveryEdition;
 };
 
@@ -139,11 +140,22 @@ function RenderConfirmation({count, busy, onCancel, onConfirm}: {count: number; 
 }
 
 export function App() {
+  useEffect(() => {
+    const id = crypto.randomUUID();
+    const endpoint = `/api/review-sessions/${id}`;
+    const ping = () => { void fetch(`${endpoint}/ping`, {method: 'POST'}).catch(() => {}); };
+    ping();
+    const timer = window.setInterval(ping, 10000);
+    const leave = () => { navigator.sendBeacon?.(`${endpoint}/leave`); };
+    window.addEventListener('pagehide', leave);
+    return () => { window.clearInterval(timer); window.removeEventListener('pagehide', leave); leave(); };
+  }, []);
   const startupError = new URLSearchParams(window.location.search).get('collectionError');
   const [edition, setEdition] = useState<DiscoveryEdition>(); const [loading, setLoading] = useState(true);
   const [error, setError] = useState(''); const [serviceError, setServiceError] = useState(''); const [minScore, setMinScore] = useState(0);
-  const [job, setJob] = useState<RenderJob>(); const [optimizing, setOptimizing] = useState(false); const [optimizingToolId, setOptimizingToolId] = useState<string>(); const optimizationLock = useRef(false); const [optimizationMessage, setOptimizationMessage] = useState('');
+  const [job, setJob] = useState<RenderJob>(); const [cancelBusy, setCancelBusy] = useState(false); const [optimizing, setOptimizing] = useState(false); const [optimizingToolId, setOptimizingToolId] = useState<string>(); const optimizationLock = useRef(false); const [optimizationMessage, setOptimizationMessage] = useState('');
   const [showRenderConfirm, setShowRenderConfirm] = useState(false); const [renderBusy, setRenderBusy] = useState(false);
+  const [bgm, setBgm] = useState<BgmStatus>({available: false, message: '正在检查 BGM…'}); const [bgmBusy, setBgmBusy] = useState(false);
   const editionRef = useRef<DiscoveryEdition | undefined>(undefined);
   const updateQueue = useRef<Promise<void>>(Promise.resolve());
   const editError = useRef<unknown>(undefined);
@@ -154,14 +166,17 @@ export function App() {
     try {
       const health = await api<{app: string; apiVersion: number}>('/api/health');
       if (health.app !== REVIEW_APP_ID || health.apiVersion !== REVIEW_API_VERSION) throw new Error('审核服务版本过旧。请关闭旧审核台进程，再运行 npm run review。');
-      applyEdition(parseEdition(await api<unknown>('/api/editions/latest')));
+      const latest = parseEdition(await api<unknown>('/api/editions/latest'));
+      applyEdition(latest);
+      void api<RenderJob>(`/api/editions/${latest.id}/render-job`).then(setJob).catch(() => {});
     } catch (reason) { if (!(reason instanceof Error && reason.message === '暂无工具雷达日报')) setServiceError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setLoading(false); void loadLocks(); }
   };
   useEffect(() => { void loadLatest(); }, []);
+  useEffect(() => { void api<BgmStatus>('/api/audio/bgm').then(setBgm).catch(() => setBgm({available: false, message: '暂时无法读取 BGM 状态'})); }, []);
   useEffect(() => {
-    if (!job || ['completed', 'failed'].includes(job.status)) return;
-    const timer = window.setInterval(async () => { const next = await api<RenderJob>(`/api/render-jobs/${job.id}`); setJob(next); if (['completed', 'failed'].includes(next.status)) void loadLatest(); }, 1500);
+    if (!job || ['completed', 'failed', 'canceled'].includes(job.status)) return;
+    const timer = window.setInterval(async () => { try { const next = await api<RenderJob>(`/api/render-jobs/${job.id}`); setJob(next); if (['completed', 'failed', 'canceled'].includes(next.status)) void loadLatest(); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } }, 1500);
     return () => clearInterval(timer);
   }, [job?.id, job?.status]);
   const selected = (edition?.candidates ?? []).filter((item) => item.selected).sort((a, b) => a.position - b.position);
@@ -169,7 +184,7 @@ export function App() {
   const llmTargets = (edition?.candidates ?? []).filter((item) => item.generationMethod !== 'llm');
   const estimatedChars = llmTargets.reduce((total, item) => total + Math.min(item.sources[0].content.length, 1600), 0);
   if (loading) return <main className="empty"><div className="loader"/><p>正在载入审核台…</p></main>;
-  if (startupError) return <main className="empty"><div className="empty-mark">!</div><h1>今日工具采集失败</h1><p className="startup-error">{startupError}</p><p>未使用过去日期榜单，请稍后重新运行 <code>npm run daily</code>。</p></main>;
+  if (startupError) return <main className="empty"><div className="empty-mark">!</div><h1>今日工具采集失败</h1><p className="startup-error">{startupError}</p><p>未使用过去日期榜单，请稍后重新运行 <code>npm run dev</code>。</p></main>;
   if (serviceError) return <main className="empty"><div className="empty-mark">!</div><h1>审核服务暂不可用</h1><p className="startup-error">{serviceError}</p></main>;
   if (!edition) return <EmptyState onCreated={applyEdition}/>;
   const update = (repo: string, patch: Partial<ToolCandidate>): Promise<void> => {
@@ -218,6 +233,30 @@ export function App() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setRenderBusy(false); }
   };
+  const cancelRender = async () => {
+    if (!job || cancelBusy || !['queued', 'running'].includes(job.status)) return;
+    setCancelBusy(true); setError('');
+    try { setJob(await api<RenderJob>(`/api/render-jobs/${job.id}/cancel`, {method: 'POST'})); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setCancelBusy(false); }
+  };
+  const uploadBgm = async (file: File) => {
+    if (file.size > 20 * 1024 * 1024) { setError('BGM 文件不能超过 20 MB'); return; }
+    setBgmBusy(true); setError('');
+    try {
+      const response = await fetch('/api/audio/bgm', {method: 'PUT', headers: {'content-type': 'application/octet-stream'}, body: file});
+      const result = await response.json() as BgmStatus & {error?: string};
+      if (!response.ok) throw new Error(result.error || `上传失败：HTTP ${response.status}`);
+      setBgm(result);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBgmBusy(false); }
+  };
+  const clearBgm = async () => {
+    setBgmBusy(true); setError('');
+    try { setBgm(await api<BgmStatus>('/api/audio/bgm', {method: 'DELETE'})); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBgmBusy(false); }
+  };
   const deleteLock = async (date: string, repo: string) => {
     if (!window.confirm(`删除 ${date} 的 ${repo} 锁定记录？仓库将可再次进入候选；原视频和审核数据不会删除。`)) return;
     try { await api('/api/repo-locks/delete', {method: 'POST', body: JSON.stringify({date, repo})}); await loadLocks(); setError(''); }
@@ -225,16 +264,20 @@ export function App() {
   };
   const pageTitles: Record<ReviewPage, string> = {overview: '概览', candidates: '仓库候选', locks: '锁定记录', render: '成片渲染'};
   const renderDisabled = !['draft', 'approved'].includes(edition.status) || optimizing || Boolean(optimizingToolId)
-    || Boolean(job && !['completed', 'failed'].includes(job.status)) || selected.length < 1 || selected.length > 10;
+    || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status)) || selected.length < 1 || selected.length > 10;
   return <div className="review-shell">
     <header className="review-heading"><div className="brand"><span>GH</span> {edition.brand.name}</div><h1>审核台</h1></header>
     <div className="review-layout"><nav className="review-nav" aria-label="审核台导航">{(['overview', 'candidates', 'locks', 'render'] as ReviewPage[]).map((page) => <button key={page} type="button" className={activePage === page ? 'active' : ''} aria-current={activePage === page ? 'page' : undefined} onClick={() => setActivePage(page)}>{pageTitles[page]}{page === 'locks' && lockedRepos.length > 0 ? <small>{lockedRepos.length}</small> : null}</button>)}</nav>
       <div className="review-content"><div className="review-page-head"><div><div className="eyebrow">{edition.date} · v{edition.version}</div><h2>{pageTitles[activePage]}</h2></div><div className="status-block"><span className={`status ${edition.status}`}>{edition.status}</span><small>候选 {edition.candidates.length} 项 · 已入选 {selected.length} 项</small></div></div>
-        {error && <div className="global-error">{error}<button onClick={() => setError('')}>×</button></div>}{optimizationMessage && <div className="global-error success">{optimizationMessage}<button onClick={() => setOptimizationMessage('')}>×</button></div>}{job && <div className={`job ${job.status}`}><div><strong>渲染任务：{job.status}</strong><span>{job.error || job.outputPath || job.logs.at(-1)}</span></div><progress max="100" value={job.progress}/><b>{job.progress}%</b></div>}
+        {error && <div className="global-error">{error}<button onClick={() => setError('')}>×</button></div>}{optimizationMessage && <div className="global-error success">{optimizationMessage}<button onClick={() => setOptimizationMessage('')}>×</button></div>}{job && <div className={`job ${job.status}`}><div><strong>渲染任务：{job.status === 'canceling' ? '正在取消' : job.status === 'canceled' ? '已取消' : job.status}</strong><span>{job.error || job.outputPath || job.logs.at(-1)}</span></div><progress max="100" value={job.progress}/><b>{job.progress}%</b>{['queued', 'running'].includes(job.status) && <button className="danger" onClick={() => { void cancelRender(); }} disabled={cancelBusy}>{cancelBusy ? '正在取消…' : '取消渲染'}</button>}</div>}
         {activePage === 'overview' && <main className="overview-page"><p>从今日 GitHub 热榜发现新工具，核对仓库证据与推荐文案，确认后生成视频。</p><div className="overview-stats"><div><strong>{edition.candidates.length}</strong><span>今日候选</span></div><div><strong>{selected.length}</strong><span>已入选</span></div><div><strong>{lockedRepos.length}</strong><span>成片锁定记录</span></div></div><div className="overview-actions"><button className="primary" onClick={() => setActivePage('candidates')}>审核仓库候选</button><button onClick={() => setActivePage('render')}>预览成片</button></div><TrendingRadar tools={edition.candidates}/></main>}
         {activePage === 'candidates' && <main className="candidate-page"><div className="page-actions"><label>最低实用性 <input type="range" min="0" max="100" value={minScore} onChange={(event) => setMinScore(Number(event.target.value))}/><strong>{minScore}</strong></label><button onClick={optimize} disabled={edition.status !== 'draft' || optimizing || Boolean(optimizingToolId) || !llmTargets.length}>{optimizing ? 'LLM 优化中…' : 'LLM一键优化'}</button></div><div className="section-title industry-title"><div><div className="eyebrow">TOOLS · REVIEW</div><h2>工具候选</h2></div><span>新日报默认入选前 10 项，可逐项调整</span></div><div className="candidate-list">{filtered.map((tool) => <ToolEditor key={tool.id} tool={tool} onUpdate={update} onRegenerate={regenerate} optimizing={optimizingToolId === tool.repo} optimizationLocked={optimizing || Boolean(optimizingToolId)}/>)}</div><CandidateNavigator tools={filtered}/></main>}
         {activePage === 'locks' && <main className="locked-repos" aria-label="以往锁定仓库"><h2>已成片锁定仓库</h2>{lockedRepos.length === 0 ? <p>暂无锁定记录。只有入选并成功渲染成片的仓库才会出现在这里。</p> : <div className="locked-repo-list">{lockedRepos.map((item) => <div key={`${item.date}:${item.repo}`}><time>{item.date}</time><a href={`https://github.com/${item.repo}`} target="_blank" rel="noreferrer">{item.repo}</a><button className="danger" onClick={() => deleteLock(item.date, item.repo)}>删除锁定记录</button></div>)}</div>}</main>}
-        {activePage === 'render' && <main className="render-page"><div className="render-actions"><p>将使用当前入选的 {selected.length} 个仓库。请先在“仓库候选”核对文案和来源。</p><button className="primary" onClick={() => { (document.activeElement as HTMLElement | null)?.blur(); setShowRenderConfirm(true); }} disabled={renderDisabled}>渲染成片</button></div><section className="preview-panel"><div className="preview-head"><div><div className="eyebrow">REMOTION · PLAYER</div><strong>完整成片预览</strong></div><span>{Math.round(totalDurationFrames(edition) / VIDEO_FPS)} 秒</span></div><div className="video-frame"><Player component={DailyReportVideo} inputProps={{edition, hasBgm: false}} durationInFrames={totalDurationFrames(edition)} fps={VIDEO_FPS} compositionWidth={VIDEO_WIDTH} compositionHeight={VIDEO_HEIGHT} controls loop clickToPlay style={{width: '100%', aspectRatio: '16 / 9'}}/></div><div className="preview-note">预览与正式 MP4 使用相同时间轴。项目没有被自动安装或运行，推荐依据仅来自公开仓库资料。</div></section></main>}
+        {activePage === 'render' && <main className="render-page">
+          <div className="render-actions"><p>将使用当前入选的 {selected.length} 个仓库。请先在“仓库候选”核对文案和来源。</p><button className="primary" onClick={() => { (document.activeElement as HTMLElement | null)?.blur(); setShowRenderConfirm(true); }} disabled={renderDisabled || bgmBusy}>渲染成片</button></div>
+          <div className="bgm-control"><div><strong>背景音乐</strong><p>{bgm.message}{bgm.available && bgm.durationSeconds ? ` · ${Math.round(bgm.durationSeconds)} 秒，成片中自动循环并淡入淡出` : ''}</p></div><div className="bgm-actions">{bgm.available && <button className="danger" onClick={() => { void clearBgm(); }} disabled={bgmBusy || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))}>取消选中</button>}<label className="bgm-upload">{bgmBusy ? '正在检查音频…' : bgm.available ? '更换 MP3' : '添加 MP3'}<input type="file" accept=".mp3,audio/mpeg" disabled={bgmBusy || Boolean(job && !['completed', 'failed', 'canceled'].includes(job.status))} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadBgm(file); event.target.value = ''; }}/></label></div></div>
+          <section className="preview-panel"><div className="preview-head"><div><div className="eyebrow">REMOTION · PLAYER</div><strong>完整成片预览</strong></div><span>{Math.round(totalDurationFrames(edition) / VIDEO_FPS)} 秒</span></div><div className="video-frame"><Player component={DailyReportVideo} inputProps={{edition, hasBgm: bgm.available, bgmSrc: bgm.available ? `/api/audio/files/bgm.mp3?v=${bgm.version}` : undefined}} durationInFrames={totalDurationFrames(edition)} fps={VIDEO_FPS} compositionWidth={VIDEO_WIDTH} compositionHeight={VIDEO_HEIGHT} controls loop clickToPlay style={{width: '100%', aspectRatio: '16 / 9'}}/></div><div className="preview-note">预览与正式 MP4 使用相同时间轴。项目没有被自动安装或运行，推荐依据仅来自公开仓库资料。</div></section>
+        </main>}
       </div></div>
     {showRenderConfirm && <RenderConfirmation count={selected.length} busy={renderBusy} onCancel={() => setShowRenderConfirm(false)} onConfirm={() => { void render(); }} />}
   </div>;

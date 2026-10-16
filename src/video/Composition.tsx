@@ -51,7 +51,7 @@ function Outro({edition}: {edition: DiscoveryEdition}) {
   </AbsoluteFill>;
 }
 
-export function DailyReportVideo({edition, hasBgm}: VideoProps) {
+export function DailyReportVideo({edition, hasBgm, bgmSrc}: VideoProps) {
   const timeline = buildTimeline(edition);
   const selected = edition.candidates.filter((item) => item.selected).sort((a, b) => a.position - b.position);
   return <AbsoluteFill style={{background: edition.brand.background}}>
@@ -62,6 +62,6 @@ export function DailyReportVideo({edition, hasBgm}: VideoProps) {
         : <Fade><ToolCard tool={selected[segment.toolIndex!]} brand={edition.brand} index={segment.toolIndex!} total={selected.length} /></Fade>;
       return <Sequence key={`${segment.type}-${index}`} from={segment.from} durationInFrames={segment.durationInFrames}>{content}</Sequence>;
     })}
-    {hasBgm ? <Audio src={staticFile('assets/audio/bgm.mp3')} loop volume={(frame) => interpolate(frame, [0, 15, Math.max(16, totalDurationFrames(edition) - 60), totalDurationFrames(edition)], [0, 0.12, 0.12, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})} /> : null}
+    {hasBgm ? <Audio src={bgmSrc ?? staticFile('assets/audio/bgm.mp3')} loop volume={(frame) => interpolate(frame, [0, 15, Math.max(16, totalDurationFrames(edition) - 60), totalDurationFrames(edition)], [0, 0.12, 0.12, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})} /> : null}
   </AbsoluteFill>;
 }

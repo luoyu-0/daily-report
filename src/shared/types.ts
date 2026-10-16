@@ -66,11 +66,11 @@ export type DiscoveryEdition = z.infer<typeof discoveryEditionSchema>;
 export type Edition = z.infer<typeof editionSchema>;
 
 export const renderJobSchema = z.object({
-  id: z.string(), editionId: z.string(), status: z.enum(['queued', 'running', 'completed', 'failed']),
+  id: z.string(), editionId: z.string(), status: z.enum(['queued', 'running', 'canceling', 'canceled', 'completed', 'failed']),
   progress: z.number().min(0).max(100), outputPath: z.string().optional(), error: z.string().optional(), logs: z.array(z.string()),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type RenderJob = z.infer<typeof renderJobSchema>;
 
-export const videoPropsSchema = z.object({edition: discoveryEditionSchema, hasBgm: z.boolean()});
+export const videoPropsSchema = z.object({edition: discoveryEditionSchema, hasBgm: z.boolean(), bgmSrc: z.string().optional()});
 export type VideoProps = z.infer<typeof videoPropsSchema>;

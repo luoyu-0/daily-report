@@ -6,8 +6,8 @@ export function openLocalUrl(url: string): void {
     throw new Error('只允许自动打开本机 HTTP 地址');
   }
 
-  const command = process.platform === 'win32' ? 'cmd.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  const command = process.platform === 'win32' ? 'rundll32.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
   const child = spawn(command, args, {detached: true, stdio: 'ignore', windowsHide: true});
   child.on('error', (error) => console.warn(`无法自动打开审核台：${error.message}`));
   child.unref();

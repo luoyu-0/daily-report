@@ -1,20 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import Fastify from 'fastify';
+import Fastify, {LogController} from 'fastify';
 import fastifyStatic from '@fastify/static';
 import {z} from 'zod';
 import {config} from './config.js';
 import {
-  createRenderJob, deleteRepoLock, forkEdition, getEdition, getEditionEvents, getLatestEdition, getLockedRepos, getRenderJob, getTodayLockedRepos, logEvent, resetTodayRepoLock,
+  createRenderJob, deleteRepoLock, forkEdition, getEdition, getEditionEvents, getLatestEdition, getLatestRenderJob, getLockedRepos, getRenderJob, getTodayLockedRepos, logEvent, resetTodayRepoLock, saveRenderJob,
   updateEditionStatus, upsertCandidate,
 } from './db.js';
 import {buildCandidates, mapWithConcurrency} from './pipeline/run.js';
 import {buildToolEvidence, enrichToolWithLlm} from './pipeline/llm.js';
 import {toolCandidateSchema, type DiscoveryEdition} from './shared/types.js';
 import {REVIEW_API_VERSION, REVIEW_APP_ID} from './shared/review-contract.js';
-import {renderEdition} from './render.js';
+import {cancelRenderJob, renderEdition} from './render.js';
 import {currentChinaDate} from './shared/date.js';
+import {bgmPath, clearBgm, getBgmStatus, MAX_BGM_BYTES, saveBgm} from './audio/bgm.js';
+import type {ReviewLifecycle} from './shared/review-lifecycle.js';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const editSchema = toolCandidateSchema.pick({
@@ -39,16 +41,37 @@ export function validateApproval(edition: DiscoveryEdition): string | undefined 
 export const getOptimizationTargets = (edition: DiscoveryEdition) =>
   edition.candidates.filter((item) => item.generationMethod !== 'llm');
 
-export async function createApp(serveWeb = false, launchRender = renderEdition) {
-  const app = Fastify({logger: true, bodyLimit: 1_000_000});
+export async function createApp(serveWeb = false, launchRender = renderEdition, reviewLifecycle?: ReviewLifecycle) {
+  const app = Fastify({logger: true, logController: new LogController({disableRequestLogging: true}), bodyLimit: 1_000_000});
+  app.addContentTypeParser('application/octet-stream', {parseAs: 'buffer', bodyLimit: MAX_BGM_BYTES}, (_, body, done) => done(null, body));
+
+  await app.register(fastifyStatic, {root: path.dirname(bgmPath()), prefix: '/api/audio/files/', decorateReply: false});
 
   app.get('/api/health', async () => ({ok: true, app: REVIEW_APP_ID, apiVersion: REVIEW_API_VERSION, time: new Date().toISOString()}));
+  if (reviewLifecycle) {
+    app.post('/api/review-sessions/:id/ping', async (request) => {
+      reviewLifecycle.ping((request.params as {id: string}).id);
+      return {ok: true};
+    });
+    app.post('/api/review-sessions/:id/leave', async (request) => {
+      reviewLifecycle.leave((request.params as {id: string}).id);
+      return {ok: true};
+    });
+  }
+  app.get('/api/audio/bgm', getBgmStatus);
+  app.put('/api/audio/bgm', {bodyLimit: MAX_BGM_BYTES}, async (request, reply) => {
+    if (!Buffer.isBuffer(request.body)) return reply.code(400).send({error: '请上传 MP3 文件'});
+    try { return await saveBgm(request.body); }
+    catch (error) { return reply.code(400).send({error: error instanceof Error ? error.message : String(error)}); }
+  });
+  app.delete('/api/audio/bgm', clearBgm);
   app.get('/api/editions/latest', async (_, reply) => getLatestEdition() ?? reply.code(404).send({error: '暂无工具雷达日报'}));
   app.get('/api/editions/:id', async (request, reply) => getEdition((request.params as {id: string}).id) ?? reply.code(404).send({error: '日报不存在'}));
   app.get('/api/editions/:id/events', async (request, reply) => {
     const id = (request.params as {id: string}).id;
     return getEdition(id) ? getEditionEvents(id) : reply.code(404).send({error: '日报不存在'});
   });
+  app.get('/api/editions/:id/render-job', async (request, reply) => getLatestRenderJob((request.params as {id: string}).id) ?? reply.code(404).send({error: '暂无渲染任务'}));
   app.get('/api/repo-locks', async () => ({repos: getLockedRepos()}));
   app.post('/api/repo-locks/delete', async (request, reply) => {
     const {date, repo} = z.object({date: dateSchema, repo: z.string().min(3)}).parse(request.body);
@@ -154,6 +177,16 @@ export async function createApp(serveWeb = false, launchRender = renderEdition) 
     return reply.code(202).send(job);
   });
   app.get('/api/render-jobs/:id', async (request, reply) => getRenderJob((request.params as {id: string}).id) ?? reply.code(404).send({error: '任务不存在'}));
+  app.post('/api/render-jobs/:id/cancel', async (request, reply) => {
+    const id = (request.params as {id: string}).id;
+    const job = getRenderJob(id);
+    if (!job) return reply.code(404).send({error: '任务不存在'});
+    if (job.status === 'canceling') return job;
+    if (!['queued', 'running'].includes(job.status) || !cancelRenderJob(id)) return reply.code(409).send({error: '渲染任务已结束或不在当前服务中运行'});
+    const canceling = {...job, status: 'canceling' as const, updatedAt: new Date().toISOString(), logs: [...job.logs, '正在取消渲染并清理临时文件']};
+    saveRenderJob(canceling);
+    return canceling;
+  });
 
   if (serveWeb && fs.existsSync(path.join(config.rootDir, 'dist', 'web'))) {
     await app.register(fastifyStatic, {root: path.join(config.rootDir, 'dist', 'web')});
@@ -162,8 +195,8 @@ export async function createApp(serveWeb = false, launchRender = renderEdition) 
   return app;
 }
 
-export async function startServer(port = config.appPort, serveWeb = process.env.NODE_ENV === 'production') {
-  const app = await createApp(serveWeb);
+export async function startServer(port = config.appPort, serveWeb = process.env.NODE_ENV === 'production', reviewLifecycle?: ReviewLifecycle) {
+  const app = await createApp(serveWeb, renderEdition, reviewLifecycle);
   await app.listen({host: '127.0.0.1', port});
   return app;
 }
